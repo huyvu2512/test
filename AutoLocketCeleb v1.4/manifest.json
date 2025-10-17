@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Locket Celeb",
+  "version": "1.4",
+  "description": "Hỗ trợ gửi lời mời kết bạn tự động với Locket Celeb. Công cụ được tạo bởi Huy Vũ.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://locket.binhake.dev/friends.html"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon/icon.png",
+      "48": "icon/icon.png",
+      "128": "icon/icon.png"
+    }
+  },
+  "icons": {
+      "16": "icon/icon.png",
+      "48": "icon/icon.png",
+      "128": "icon/icon.png"
+  }
+}

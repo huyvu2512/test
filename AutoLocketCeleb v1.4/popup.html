@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Auto Locket Celeb</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Auto Locket Celeb</h2>
+    
+    <div class="section">
+      <h3>1. Nhập danh sách ID</h3>
+      <textarea id="id-list" rows="8" placeholder="Nhập nhiều ID, mỗi ID một dòng..."></textarea>
+      
+      <div class="celeb-select-container">
+        <label for="celeb-select">Hoặc chọn nhanh ID có sẵn:</label>
+        <div class="select-wrapper">
+            <select id="celeb-select" class="celeb-select">
+                <option value="" disabled selected>-- Chọn một celeb --</option>
+            </select>
+            <button id="select-all-btn" title="Chọn tất cả celeb trong danh sách">Chọn tất cả</button>
+            <button id="rescan-btn" title="Quét lại danh sách bạn bè">🔄</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section controls">
+      <button id="start-btn">Bắt đầu</button>
+      <button id="pause-btn" disabled>Tạm dừng</button>
+      <button id="resume-btn" disabled>Tiếp tục</button>
+      <button id="stop-btn" disabled>Dừng</button>
+      <button id="reset-btn" title="Reset lại toàn bộ công cụ">Reset</button>
+    </div>
+
+    <div class="section timer-section">
+      <label class="checkbox-label">
+        <input type="checkbox" id="enable-timer">
+        Tự động F5 trang sau:
+      </label>
+      <input type="number" id="timer-minutes" value="5" min="1">
+      <label>phút</label>
+      <p id="countdown-display"></p>
+    </div>
+    <div class="section">
+      <h3>2. Tiến trình & Nhật ký</h3>
+      <div id="progress-container">
+        <p id="progress-status">Sẵn sàng để bắt đầu...</p>
+        <table id="progress-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <pre id="log-area"></pre>
+    </div>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

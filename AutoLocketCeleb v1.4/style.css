@@ -1,0 +1,51 @@
+body {
+  font-family: Arial, sans-serif;
+  width: 400px;
+  background-color: #f4f4f9;
+  color: #333;
+  padding: 10px;
+}
+.container { display: flex; flex-direction: column; gap: 15px; }
+h2, h3 { margin: 0; color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px; }
+.section { background-color: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+textarea { width: 95%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
+.celeb-select-container { margin-top: 10px; }
+.celeb-select-container label { display: block; margin-bottom: 5px; }
+.select-wrapper { display: flex; align-items: center; gap: 5px; }
+.celeb-select { flex-grow: 1; width: auto; padding: 8px; border: 1px solid #ccc; border-radius: 4px; background-color: white; }
+#rescan-btn, #select-all-btn {
+  padding: 6px 10px; border: 1px solid #ccc; background-color: #f0f0f0;
+  border-radius: 4px; cursor: pointer; font-size: 14px; flex-shrink: 0;
+  white-space: nowrap;
+}
+#rescan-btn { font-size: 16px; }
+#rescan-btn:hover, #select-all-btn:hover { background-color: #e0e0e0; }
+.celeb-select option:disabled {
+  color: #999;
+  background-color: #f0f0f0;
+}
+.controls { display: flex; gap: 5px; justify-content: space-around; }
+.controls button {
+  flex-grow: 1; padding: 10px 5px; border: none; border-radius: 5px;
+  color: white; cursor: pointer; transition: background-color 0.3s, opacity 0.3s;
+  font-size: 13px;
+}
+.timer-section { display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
+.checkbox-label { display: flex; align-items: center; gap: 5px; }
+.timer-section input[type="number"] { width: 50px; padding: 4px; }
+#countdown-display { margin: 0; font-weight: bold; color: #dc3545; }
+#start-btn { background-color: #28a745; }
+#pause-btn { background-color: #ffc107; }
+#resume-btn { background-color: #17a2b8; }
+#stop-btn { background-color: #dc3545; }
+#reset-btn { background-color: #343a40; }
+button:disabled { background-color: #6c757d !important; opacity: 0.5; cursor: not-allowed; }
+button:not(:disabled):hover { opacity: 0.9; }
+#progress-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+#progress-table th, #progress-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+#progress-table th { background-color: #f2f2f2; }
+#log-area {
+  background-color: #2b2b2b; color: #f1f1f1; padding: 10px; border-radius: 5px;
+  max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;
+  margin-top: 15px;
+}
