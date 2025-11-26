@@ -1,0 +1,5 @@
+{
+  "name": "test",
+  "description": "Landing page for the Auto Locket Celeb Tampermonkey script.",
+  "requestFramePermissions": []
+}
