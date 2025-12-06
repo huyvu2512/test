@@ -1276,87 +1276,124 @@
                 background: rgba(255,255,255,0.1); border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd;
             }
 
-            /* --- MOBILE RESPONSIVE STYLES --- */
-            @media (max-width: 480px) {
+            /* --- MOBILE RESPONSIVE STYLES (UPDATED) --- */
+            @media (max-width: 600px) { /* Increased breakpoint to catch larger phones */
+                /* Main Container Scaling */
                 #auto-celeb-main-container {
-                    padding: 16px;
-                    gap: 12px;
                     width: calc(100vw - 24px);
-                    max-width: none;
                     left: 50%;
                     transform: translateX(-50%);
                     top: 60px;
-                    border-radius: 24px;
-                }
-                #auto-celeb-popup-header {
-                    padding: 8px 12px;
-                    gap: 10px;
-                }
-                #auto-celeb-title-icon {
-                    width: 42px; height: 42px; border-radius: 14px;
-                }
-                #auto-celeb-title-icon svg { width: 22px; height: 22px; }
-                #auto-celeb-app-name { font-size: 16px; }
-                #auto-celeb-version-badge { padding: 1px 8px; font-size: 9px; }
-
-                #auto-celeb-tab-nav { margin-bottom: 8px; }
-                .nav-tab { padding: 8px 0; font-size: 13px; }
-                .nav-tab-icon { width: 16px; height: 16px; }
-
-                .auto-celeb-action-btn {
                     padding: 12px 14px;
-                    min-height: 60px;
-                    border-radius: 18px;
+                    border-radius: 20px;
+                    max-width: none;
                 }
-                .action-btn-icon-wrapper {
-                    width: 42px; height: 42px;
-                    margin-right: 12px;
-                    border-radius: 12px;
-                }
-                .action-btn-icon-wrapper svg { width: 20px; height: 20px; }
-                .action-btn-label { font-size: 13px; margin-bottom: 0; }
-                .action-btn-subtitle { font-size: 10px; }
-                .action-btn-chevron-circle { width: 28px; height: 28px; margin-left: 8px; }
-                .action-btn-chevron { width: 16px; height: 16px; }
+                
+                /* Header */
+                #auto-celeb-popup-header { padding: 8px; }
+                #auto-celeb-title-icon { width: 38px; height: 38px; }
+                #auto-celeb-title-icon svg { width: 20px; height: 20px; }
+                #auto-celeb-app-name { font-size: 15px; }
+                #auto-celeb-version-badge { font-size: 9px; padding: 1px 6px; }
 
-                #auto-celeb-footer-buttons { gap: 8px; margin-top: 4px; }
-                #auto-celeb-footer-buttons .footer-btn {
-                    padding: 10px 8px;
-                    border-radius: 14px;
-                    font-size: 11px;
-                }
-                .footer-btn-icon { width: 18px; height: 18px; }
+                /* Action Buttons */
+                .auto-celeb-action-btn { min-height: 50px; padding: 10px; }
+                .action-btn-icon-wrapper { width: 32px; height: 32px; margin-right: 8px; border-radius: 10px; }
+                .action-btn-icon-wrapper svg { width: 16px; height: 16px; }
+                .action-btn-label { font-size: 12px; }
+                .action-btn-subtitle { font-size: 9px; }
+                .action-btn-chevron-circle { width: 20px; height: 20px; margin-left: 5px; }
+                .action-btn-chevron { width: 12px; height: 12px; }
 
-                /* Fix Dashboard Modal on Mobile */
+                /* Footer */
+                #auto-celeb-footer-buttons { gap: 6px; margin-top: 5px; }
+                #auto-celeb-footer-buttons .footer-btn { padding: 8px 4px; font-size: 9px; }
+                .footer-btn-icon { width: 14px; height: 14px; }
+
+                /* DASHBOARD MODAL (Horizontal Layout on Mobile) */
                 #celeb-dashboard-modal, #modal-information {
-                    width: 95vw !important;
-                    max-width: 95vw !important;
+                    width: 96vw !important;
+                    max-width: 96vw !important;
                     left: 50% !important;
                     top: 50% !important;
                     transform: translate(-50%, -50%) !important;
-                    padding: 15px !important;
+                    padding: 10px !important;
                     padding-top: 35px !important;
-                    max-height: 85vh;
-                    overflow-y: auto;
+                    max-height: 92vh;
+                    overflow: hidden;
+                    border-radius: 12px !important;
                 }
+                
                 #modal-dashboard-layout {
-                    flex-direction: column;
-                    gap: 15px;
+                    flex-direction: row !important; /* Force Horizontal */
+                    gap: 8px;
+                    height: 100%;
                     margin-top: 0;
                 }
+
+                /* Left Col */
                 #modal-celeb-list-wrapper {
-                    border-right: none;
-                    border-bottom: 1px solid rgba(255,255,255,0.1);
-                    padding-right: 0;
-                    padding-bottom: 15px;
-                    min-height: 250px;
-                    max-height: 35vh;
-                    flex: none;
+                    flex: 1.2; /* Slightly narrower list */
+                    border-right: 1px solid rgba(255,255,255,0.1);
+                    padding-right: 4px;
+                    min-height: 0;
+                    overflow-y: auto;
+                    display: flex;
+                    flex-direction: column;
                 }
+                #modal-celeb-list-wrapper h3 { font-size: 13px; margin-bottom: 6px; }
+                
+                #celeb-select-all-label { padding: 5px; flex-direction: column; align-items: flex-start; gap: 4px; }
+                #celeb-select-all-text { font-size: 10px; }
+                #celeb-selected-count { font-size: 8px; padding: 1px 4px; display: none; } /* Hide count text if too small */
+                .select-all-toggle { transform: scale(0.6); transform-origin: right center; margin: -20px 0 0 auto; }
+                #celeb-selection-list { padding-right: 2px; }
+
+                .celeb-list-item-new { padding: 6px; margin-bottom: 4px; border-radius: 8px; }
+                .celeb-list-item-main { gap: 8px; }
+                .celeb-list-profile-image img { width: 28px; height: 28px; border-radius: 8px; }
+                .celeb-list-icon { width: 12px; height: 12px; font-size: 8px; right: -3px; bottom: -3px; }
+                .celeb-list-profile-name { font-size: 10px; max-width: 60px; }
+                .celeb-list-progress { height: 4px; }
+                .celeb-list-progress-text { font-size: 8px; }
+                .celeb-item-toggle-wrapper { transform: scale(0.6); transform-origin: right center; margin-left: 2px; }
+
+                /* Right Col */
                 #modal-celeb-controls-wrapper {
-                    min-height: auto;
-                    flex: none;
+                    flex: 1.8; /* Wider controls */
+                    min-height: 0;
+                    overflow-y: auto;
+                    gap: 6px;
+                    padding-bottom: 10px;
                 }
+                
+                #dashboard-control-button { padding: 8px; font-size: 11px; }
+                
+                /* Timer */
+                #dashboard-timer-ui { height: 40px; padding: 4px; }
+                #dashboard-timer-ui #timer-display { font-size: 16px; min-width: 40px; }
+                #dashboard-timer-ui #timer-progress-ring { width: 20px; height: 20px; }
+                .timer-adjust-btn { font-size: 9px; min-width: 20px; padding: 2px; }
+                #dashboard-timer-ui #timer-toggle-switch { transform: scale(0.6); transform-origin: right center; width: 35px; }
+
+                /* Chart */
+                #running-chart-container { height: 60px; }
+                #running-stats-container { padding: 6px; }
+                #running-stats-container p { font-size: 9px; margin: 1px 0; }
+                
+                /* Logs */
+                #dashboard-log-wrapper { margin-top: 4px; min-height: 60px; }
+                #dashboard-log-wrapper label { font-size: 9px; }
+                #dashboard-script-log { font-size: 9px; padding: 4px; line-height: 1.2; }
+                
+                /* Info Modal specific */
+                #info-panel-tabs { gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+                .info-celeb-item { padding: 6px; gap: 8px; border-radius: 12px; }
+                .info-celeb-avatar-wrapper img { width: 32px; height: 32px; }
+                .info-celeb-details .name { font-size: 11px; }
+                .info-celeb-details .uid { font-size: 9px; }
+                .info-celeb-status-btn { padding: 4px 6px; font-size: 9px; }
+                .info-tab-button { padding: 6px 8px; font-size: 10px; white-space: nowrap; }
             }
         `;
         document.head.appendChild(style);
