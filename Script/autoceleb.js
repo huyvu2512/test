@@ -1,3 +1,4 @@
+
 // ==UserScript==
 // @name         Auto Locket Celeb (v1.3)
 // @namespace    http://tampermonkey.net/
@@ -1273,6 +1274,89 @@
             }
             .redirect-notice-button:hover {
                 background: rgba(255,255,255,0.1); border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd;
+            }
+
+            /* --- MOBILE RESPONSIVE STYLES --- */
+            @media (max-width: 480px) {
+                #auto-celeb-main-container {
+                    padding: 16px;
+                    gap: 12px;
+                    width: calc(100vw - 24px);
+                    max-width: none;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    top: 60px;
+                    border-radius: 24px;
+                }
+                #auto-celeb-popup-header {
+                    padding: 8px 12px;
+                    gap: 10px;
+                }
+                #auto-celeb-title-icon {
+                    width: 42px; height: 42px; border-radius: 14px;
+                }
+                #auto-celeb-title-icon svg { width: 22px; height: 22px; }
+                #auto-celeb-app-name { font-size: 16px; }
+                #auto-celeb-version-badge { padding: 1px 8px; font-size: 9px; }
+
+                #auto-celeb-tab-nav { margin-bottom: 8px; }
+                .nav-tab { padding: 8px 0; font-size: 13px; }
+                .nav-tab-icon { width: 16px; height: 16px; }
+
+                .auto-celeb-action-btn {
+                    padding: 12px 14px;
+                    min-height: 60px;
+                    border-radius: 18px;
+                }
+                .action-btn-icon-wrapper {
+                    width: 42px; height: 42px;
+                    margin-right: 12px;
+                    border-radius: 12px;
+                }
+                .action-btn-icon-wrapper svg { width: 20px; height: 20px; }
+                .action-btn-label { font-size: 13px; margin-bottom: 0; }
+                .action-btn-subtitle { font-size: 10px; }
+                .action-btn-chevron-circle { width: 28px; height: 28px; margin-left: 8px; }
+                .action-btn-chevron { width: 16px; height: 16px; }
+
+                #auto-celeb-footer-buttons { gap: 8px; margin-top: 4px; }
+                #auto-celeb-footer-buttons .footer-btn {
+                    padding: 10px 8px;
+                    border-radius: 14px;
+                    font-size: 11px;
+                }
+                .footer-btn-icon { width: 18px; height: 18px; }
+
+                /* Fix Dashboard Modal on Mobile */
+                #celeb-dashboard-modal, #modal-information {
+                    width: 95vw !important;
+                    max-width: 95vw !important;
+                    left: 50% !important;
+                    top: 50% !important;
+                    transform: translate(-50%, -50%) !important;
+                    padding: 15px !important;
+                    padding-top: 35px !important;
+                    max-height: 85vh;
+                    overflow-y: auto;
+                }
+                #modal-dashboard-layout {
+                    flex-direction: column;
+                    gap: 15px;
+                    margin-top: 0;
+                }
+                #modal-celeb-list-wrapper {
+                    border-right: none;
+                    border-bottom: 1px solid rgba(255,255,255,0.1);
+                    padding-right: 0;
+                    padding-bottom: 15px;
+                    min-height: 250px;
+                    max-height: 35vh;
+                    flex: none;
+                }
+                #modal-celeb-controls-wrapper {
+                    min-height: auto;
+                    flex: none;
+                }
             }
         `;
         document.head.appendChild(style);
