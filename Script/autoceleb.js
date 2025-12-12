@@ -1,14 +1,15 @@
-
 // ==UserScript==
-// @name         Auto Locket Celeb (v1.3)
+// @name         Auto Locket Celeb (v1.4)
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Tự động kết bạn với tất cả Celeb, thống kê tài khoản.
 // @author       Huy Vũ
 // @match        https://locket.binhake.dev/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @connect      open.oapi.vn
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
 // @icon         https://i.imgur.com/AM2f24N.png
 // ==/UserScript==
 (function() {
@@ -22,23 +23,28 @@
         TIMER_CONFIG_KEY: 'autoCelebTimerConfig_v2.9',
         TIMER_RESTART_KEY: 'autoCelebTimerRestart',
         TIMER_END_TIME_KEY: 'autoCelebTimerEndTime',
+
         TARGET_PAGE: 'https://locket.binhake.dev/celebrity.html',
         FRIENDS_PAGE: 'https://locket.binhake.dev/friends.html',
         LOGIN_PAGE: 'https://locket.binhake.dev/login.html',
         LOGO_URL: 'https://i.imgur.com/AM2f24N.png',
+        CONNECTION_LOST_COUNTER_KEY: 'autoCelebConnectionLostCounter',
+        CONNECTION_LOST_TRIGGER_STRING: "The connection was suddenly lost. Reconnecting after 5 second...",
 
         CELEB_RESTART_KEY: 'autoCelebCelebRestart',
         AUTO_RELOAD_KEY: 'autoCelebAutoReload', // Flag đánh dấu công cụ tự reload
-        CONNECTION_LOST_COUNTER_KEY: 'autoCelebConnectionLostCounter',
-        CONNECTION_LOST_TRIGGER_STRING: "The connection was suddenly lost. Reconnecting after 5 second...",
         PROCESSED_CELEBS_KEY: 'autoCelebProcessedCelebs_v1',
-        CONNECTION_LOST_MAX_RETRIES: 5,
 
-        SECRET_KEY: '2025',
         KEY_STORAGE_KEY: 'autoCelebKeyValidated_v1',
-        MESSENGER_LINK: 'https://www.messenger.com/c/655145337208323/',
+        COLLAPSE_STATE_KEY: 'autoCelebCollapseState_v1',
+        RUN_STATS_KEY: 'autoCelebRunStats_v1',
+        CONNECTION_LOST_MAX_RETRIES: 5,
+        MESSENGER_LINK: 'https://www.messenger.com/c/655145337208323/', // Link Messenger hỗ trợ
 
-        SCRIPT_VERSION: 'v1.3',
+        SCRIPT_VERSION: 'v1.4',
+        API_URL: 'https://script.google.com/macros/s/AKfycbyKuzSQkkCn4J92u4OSvE-LiMTWBEbWxsUj_aETIg_dLZbkR0bQjeRPKE7xr5oX7ePZYQ/exec?sheet=quanly',
+        API_CELEB_URL: 'https://script.google.com/macros/s/AKfycbyKuzSQkkCn4J92u4OSvE-LiMTWBEbWxsUj_aETIg_dLZbkR0bQjeRPKE7xr5oX7ePZYQ/exec?sheet=celeb',
+        API_CACHE_DURATION_MS: 5 * 60 * 1000, // 5 phút
         get DISPLAY_VERSION() { return `Premium v${this.SCRIPT_VERSION.replace('v', '')}`; }, // Version hiển thị trên Badge
         UPDATE_URL: 'https://raw.githubusercontent.com/huyvu2512/locket-celebrity/main/script/tampermonkey.user.js'
     };
@@ -61,6 +67,8 @@
     let runTimerInterval = null;
     let runConnectionLostCount = 0; // Số lần mất kết nối (Lỗi)
     let runSentCount = 0;
+    let runSuccessCount = 0; // Số lượng thành công
+    let successfulCelebIds = new Set(); // Set lưu ID các celeb đã thành công
     let runAutoResetCount = 0; // Số lần công cụ tự động reset (Reset)
 
     // --- CHART STATE ---
@@ -75,8 +83,14 @@
     let isTabActive = true;
     let processedCelebs = [];
 
+    let backgroundApiCheckInterval = null;
     let celebScanRetryInterval = null;
     let infoPanelScanInterval = null;
+    let knownCelebStatuses = {}; // Cache để lưu trạng thái của celeb, chống lại việc UI bị re-render
+
+// --- BIẾN CACHE CHO BẢNG THỐNG KÊ KHI CHẠY AUTO ---
+let cachedPendingCelebs = null;
+let cachedOtherCelebsData = null; // Cache for the "Others" tab data
 
     // --- UI & Logging ---
 
@@ -100,7 +114,23 @@
                 'Bắt đầu theo dõi nhật ký của', 'Tiếp tục xử lý danh sách celeb...', 'Vui lòng nhập username để bắt đầu lặp.',
                 'Phát hiện F5 thủ công. Đang reset công cụ...',
                 'Đang khôi phục quy trình...',
-                'Đã mở rộng toàn bộ danh sách celeb.'
+                'Đã mở rộng toàn bộ danh sách celeb.',
+                // Lọc các log chi tiết của quá trình auto celeb
+                'Bắt đầu...',
+                'Bắt đầu quy trình Full-Auto cho',
+                'Giai đoạn 1: Mở rộng tất cả các thẻ',
+                'Mở rộng thẻ cho:',
+                'Hoàn tất Giai đoạn 1.',
+                'Giai đoạn 2: Bắt đầu gửi yêu cầu',
+                'Đang xử lý:',
+                'Click "Bắt đầu" cho',
+                'Hoàn tất Giai đoạn 2.',
+                'Sử dụng dữ liệu từ cache',
+                'Hệ thống đã tạm dừng (phát hiện ngầm). Đang khóa công cụ...',
+                'Đã lưu trạng thái "Hàng chờ" trước khi chạy.',
+                'Đã xóa cache trạng thái "Hàng chờ".',
+                'Người dùng đã dừng. Đang tải lại...',
+                'Chưa chọn celeb nào.'
             ];
 
             const isFiltered = filteredMessages.some(filter => message.includes(filter));
@@ -123,7 +153,7 @@
     }
 
     function loadPersistentLog() {
-        if (window.location.href !== CONFIG.TARGET_PAGE) return;
+        if (!window.location.href.startsWith(CONFIG.TARGET_PAGE)) return;
         try {
             const storedLog = sessionStorage.getItem(CONFIG.LOG_STORAGE_KEY);
             const logTextarea = document.getElementById('dashboard-script-log');
@@ -136,6 +166,37 @@
         }
     }
 
+    function saveRunStats() {
+        const stats = {
+            sent: runSentCount,
+            success: runSuccessCount,
+            connectionLost: runConnectionLostCount,
+            reset: runAutoResetCount,
+            startTime: runStartTime,
+            successfulIds: Array.from(successfulCelebIds) // Convert Set to Array for JSON
+        };
+        localStorage.setItem(CONFIG.RUN_STATS_KEY, JSON.stringify(stats));
+    }
+
+    function loadRunStats() {
+        const statsStr = localStorage.getItem(CONFIG.RUN_STATS_KEY);
+        if (statsStr) {
+            const stats = JSON.parse(statsStr);
+            runSentCount = stats.sent || 0;
+            runSuccessCount = stats.success || 0;
+            runConnectionLostCount = stats.connectionLost || 0;
+            runAutoResetCount = stats.reset || 0;
+            runStartTime = stats.startTime || Date.now();
+            successfulCelebIds = new Set(stats.successfulIds || []);
+            return true;
+        }
+        return false;
+    }
+
+    function clearRunStats() {
+        localStorage.removeItem(CONFIG.RUN_STATS_KEY);
+    }
+
     function formatTimeWithHours(totalSeconds) {
         const absSeconds = Math.abs(totalSeconds);
         const hours = Math.floor(absSeconds / 3600);
@@ -146,6 +207,108 @@
     }
 
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    function compareVersions(v1, v2) {
+        const parts1 = (v1 || '0').replace('v', '').split('.').map(p => parseInt(p.match(/\d+/)?.[0] || '0', 10));
+        const parts2 = (v2 || '0').replace('v', '').split('.').map(p => parseInt(p.match(/\d+/)?.[0] || '0', 10));
+        const len = Math.max(parts1.length, parts2.length);
+        for (let i = 0; i < len; i++) {
+            const p1 = parts1[i] || 0;
+            const p2 = parts2[i] || 0;
+            if (p1 > p2) return 1;
+            if (p1 < p2) return -1;
+        }
+        return 0;
+    }
+
+    function fetchUrl(url, cacheKey, isBackgroundRefresh = false, forceRefresh = false) {
+        return new Promise((resolve, reject) => {
+            if (!forceRefresh) {
+                try {
+                    const cachedItem = sessionStorage.getItem(cacheKey);
+                    if (cachedItem) {
+                        const { timestamp, data } = JSON.parse(cachedItem);
+                        if (Date.now() - timestamp < CONFIG.API_CACHE_DURATION_MS) {
+                            if (!isBackgroundRefresh) {
+                                log(`Sử dụng dữ liệu từ cache (${cacheKey}).`, 'info');
+                            }
+                            return resolve(data);
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[Auto Locket Celeb] Lỗi khi đọc cache ${cacheKey}:`, e);
+                    sessionStorage.removeItem(cacheKey); // Xóa cache bị lỗi
+                }
+            }
+
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: url,
+                anonymous: true,
+                timeout: 15000, // Thêm timeout 15 giây để tránh treo
+                onload: function(response) {
+                    try {
+                        // Kiểm tra xem phản hồi có phải là trang đăng nhập của Google không
+                        if (response.responseText && !response.responseText.includes('<title>Google Accounts</title>')) {
+                            const responseData = JSON.parse(response.responseText);
+                            let dataPayload;
+
+                            if (responseData && typeof responseData === 'object' && !Array.isArray(responseData) && responseData.success === true) {
+                                dataPayload = responseData.data;
+                            } else if (Array.isArray(responseData)) {
+                                dataPayload = responseData;
+                            } else {
+                                console.error('[Auto Locket Celeb] API response format not recognized. Response:', response.responseText);
+                                reject(new Error(responseData.error || 'Định dạng phản hồi API không nhận dạng được.'));
+                                return;
+                            }
+
+                            if (!Array.isArray(dataPayload)) {
+                                console.error('[Auto Locket Celeb] API data payload is not an array. Payload:', dataPayload);
+                                reject(new Error('Dữ liệu API trả về không phải là một mảng.'));
+                                return;
+                            }
+
+                            const dataToCache = { timestamp: Date.now(), data: dataPayload };
+                                sessionStorage.setItem(cacheKey, JSON.stringify(dataToCache));
+                                if (isBackgroundRefresh) {
+                                    if (forceRefresh) {
+                                         console.log(`[Auto Locket Celeb] Cache ${cacheKey} refreshed by background check.`);
+                                    } else {
+                                         console.log(`[Auto Locket Celeb] Cache ${cacheKey} đã được làm mới trong nền.`);
+                                    }
+                                }
+                            resolve(dataPayload);
+                        } else {
+                            // Google đã trả về trang đăng nhập hoặc lỗi HTML khác
+                            console.error('[Auto Locket Celeb] API did not return JSON. It might be a Google redirect. Response Text:', response.responseText);
+                            reject(new Error('Lỗi API: Bị chuyển hướng tới trang đăng nhập Google. Hãy thử đăng nhập lại tài khoản Google chính trên trình duyệt.'));
+                        }
+                    } catch (e) {
+                        console.error('[Auto Locket Celeb] Failed to parse API response. Error:', e, 'Response Text:', response.responseText);
+                        reject(new Error(`Lỗi phân tích phản hồi API: ${e.message}. Vui lòng kiểm tra console để xem chi tiết.`));
+                    }
+                },
+                onerror: function(response) {
+                    console.error('[Auto Locket Celeb] Network error during API fetch.', response);
+                    reject(new Error('Lỗi mạng khi gọi API. Vui lòng kiểm tra kết nối internet.'));
+                },
+                ontimeout: function() {
+                    console.error('[Auto Locket Celeb] API request timed out.');
+                    reject(new Error('Yêu cầu API quá hạn. Vui lòng thử lại.'));
+                }
+            });
+        });
+    }
+
+    function fetchApiData(isBackgroundRefresh = false, forceRefresh = false) {
+        return fetchUrl(CONFIG.API_URL, 'autoCelebApiCache_v1', isBackgroundRefresh, forceRefresh);
+    }
+
+    function fetchCelebData(forceRefresh = false) {
+        return fetchUrl(CONFIG.API_CELEB_URL, 'autoCelebOtherCelebsCache_v1', false, forceRefresh);
+    }
+
 
     function waitForElementById(elementId, timeout = 180000, interval = 500) {
         return new Promise((resolve, reject) => {
@@ -180,6 +343,7 @@
             let timeoutId = setTimeout(() => { clearInterval(interval); reject(new Error(`Timeout waiting for ${selector}`)); }, timeout);
         });
     }
+
 
     function injectNewStyles() {
         const style = document.createElement('style');
@@ -231,7 +395,7 @@
                 border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 25px 80px rgba(0,0,0,0.55);
                 border-radius: 36px; padding: 22px 24px 26px; top: 80px; left: 20px; right: auto; bottom: auto;
                 max-height: 90vh; overflow: visible;
-                transition: max-height 0.3s ease, padding-top 0.3s ease, padding-bottom 0.3s ease, box-shadow 0.3s;
+                transition: max-height 0.3s ease, padding-top 0.3s ease, padding-bottom 0.3s ease, box-shadow 0.3s, left 0.3s ease;
             }
             #auto-celeb-main-container::before,
             #auto-celeb-main-container::after {
@@ -352,6 +516,7 @@
                 background: transparent;
                 border: none;
                 box-shadow: none;
+                backdrop-filter: none;
             }
             #auto-celeb-main-container.collapsed #auto-celeb-popup-header {
                 margin: 0;
@@ -361,8 +526,10 @@
                 box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 20px rgba(0,0,0,0.35);
             }
             #auto-celeb-main-container.collapsed #auto-celeb-header-content { flex-grow: 1; }
-            #auto-celeb-main-container.collapsed > *:not(#auto-celeb-popup-header) { display: none; }
+            #auto-celeb-main-container.collapsed > *:not(#auto-celeb-popup-header) { display: none !important; }
             #auto-celeb-main-container.collapsed .lc-ambient-glow { display: none; }
+            #auto-celeb-main-container.collapsed::before,
+            #auto-celeb-main-container.collapsed::after { display: none; }
 
             /* Modern Segmented Control Style */
             #auto-celeb-tab-nav {
@@ -424,8 +591,9 @@
 
             #auto-celeb-main-container.locked #auto-celeb-tab-nav,
             #auto-celeb-main-container.locked #auto-celeb-actions-wrapper,
-            #auto-celeb-main-container.locked #auto-celeb-redirect-buttons,
-            #auto-celeb-main-container.locked #auto-friend-tool-wrapper { display: none; }
+            #auto-celeb-main-container.locked #auto-friend-tool-wrapper,
+            #auto-celeb-main-container.locked #auto-celeb-redirect-notice,
+            #auto-celeb-main-container.locked #auto-celeb-login-notice { display: none; }
             #auto-celeb-main-container.locked #auto-celeb-footer-buttons { display: none; }
             #auto-celeb-main-container:not(.locked) #auto-celeb-key-wall { display: none; }
             #auto-celeb-key-wall { display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0; }
@@ -791,7 +959,7 @@
             #running-stats-container {
                 flex-shrink: 0; background: rgba(0,0,0,0.2);
                 border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
-                padding: 10px 15px; max-height: 150px; overflow-y: auto;
+                padding: 10px 15px;
             }
             #running-stats-container p {
                 font-size: 14px; color: #eee; margin: 5px 0; display: flex; justify-content: space-between;
@@ -800,26 +968,27 @@
             #running-stats-container p span {
                 font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #f59e0b;
             }
+            #running-stats-container p #stat-sent { color: #f9a8d4; }
             #running-stats-container p #stat-time { color: #22c55e; }
             #running-stats-container p #stat-error { color: #ef4444; }
 
-            #processed-celebs-container {
+            #processed-celebs-container, #success-celebs-container {
                 flex-shrink: 0; background: rgba(0,0,0,0.2);
                 border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
-                padding: 10px 15px; margin-top: 15px;
+                padding: 10px 15px;
+                display: flex; flex-direction: column;
+                overflow: hidden; /* Ngăn container bị kéo dài bởi nội dung, buộc list bên trong phải scroll */
             }
-            #processed-celebs-container p {
+            #processed-celebs-container p, #success-celebs-container p {
                 font-size: 14px; color: #eee; margin: 0 0 10px 0; font-weight: 600;
             }
-            #processed-celebs-list {
+            #processed-celebs-list, #success-celebs-list {
                 display: flex; flex-wrap: nowrap; gap: 4px; align-items: center;
                 overflow-x: auto; overflow-y: hidden;
                 padding-bottom: 5px;
-                max-width: calc(8 * 40px + 7 * 8px); /* 8 icons (40px each) + 7 gaps (8px each) = 376px */
                 cursor: grab; user-select: none;
             }
-            #processed-celebs-list.dragging { cursor: grabbing; scroll-behavior: auto; }
-            #processed-celebs-list:not(.dragging) { scroll-behavior: smooth; }
+            #processed-celebs-list.dragging, #success-celebs-list.dragging { cursor: grabbing; }
             .processed-celeb-item {
                 flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%;
                 object-fit: cover; border: 2px solid #f472b6;
@@ -890,7 +1059,7 @@
                 background: rgba(15,15,20,0.85) !important; backdrop-filter: blur(15px) !important;
                 border: 1px solid rgba(255,255,255,0.15) !important;
                 box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
-                border-radius: 16px !important; width: 750px; max-width: 90vw;
+                border-radius: 16px !important; width: 750px; max-width: 90vw; transition: left 0.3s ease;
                 padding: 12px !important; padding-top: 40px !important; z-index: 10000;
             }
             #celeb-dashboard-modal .auto-celeb-modal-close { display: none !important; }
@@ -901,7 +1070,7 @@
                 background: rgba(15,15,20,0.85) !important; backdrop-filter: blur(15px) !important;
                 border: 1px solid rgba(255,255,255,0.15) !important;
                 box-shadow: 0 8px 30px rgba(0,0,0,0.3) !important;
-                border-radius: 16px !important; display: flex; flex-direction: column;
+                border-radius: 16px !important; display: flex; flex-direction: column; transition: left 0.3s ease;
                 min-height: 480px; max-height: calc(60vh + 90px);
                 padding: 20px !important; padding-top: 40px !important; z-index: 10002;
             }
@@ -977,6 +1146,11 @@
                 border: 2px solid rgba(15,15,20,0.9);
                 box-shadow: 0 4px 10px rgba(0,0,0,0.35);
             }
+            /* Căn chỉnh lại icon trái tim cho cân đối */
+            .info-celeb-avatar-icon .heart-icon {
+                position: relative;
+                top: 1px;
+            }
 
             .info-celeb-details { flex-grow: 1; min-width: 0; }
             .info-celeb-details .name { font-weight: 700; color: #fff; font-size: 15px; }
@@ -1003,6 +1177,7 @@
             .info-celeb-status-btn.pending { background: linear-gradient(135deg, #60a5fa, #2563eb); color: #e0f2fe; }
             .info-celeb-status-btn.add { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #fff7ed; }
             .info-celeb-status-btn.full { background: linear-gradient(135deg, #f87171, #ef4444); color: #fff1f2; }
+            .info-celeb-status-btn.external { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #fff7ed; }
             .info-celeb-status-btn.clickable-add {
                 cursor: pointer;
                 transition: transform 0.2s ease, filter 0.2s ease;
@@ -1013,12 +1188,22 @@
             }
             .info-celeb-status-btn svg { width: 12px; height: 12px; fill: currentColor; }
 
+            /* Grid layout for 'Others' tab */
+            #info-panel-list.info-grid-layout {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+            }
+            #info-panel-list.info-grid-layout .info-celeb-item {
+                margin-bottom: 0; /* Use gap instead of margin */
+            }
+
 
             #modal-dashboard-layout { display: flex; gap: 20px; margin-top: -15px; }
             #modal-celeb-list-wrapper {
                 flex: 1.5; border-right: 1px solid #444; padding-right: 20px;
                 overflow: visible; /* Fix cho item bị cắt khi hover */
-                min-height: 450px; max-height: 60vh; display: flex; flex-direction: column;
+                min-height: 450px; max-height: 60vh; display: flex; flex-direction: column; min-width: 0;
             }
             #modal-celeb-list-wrapper h3 { color: white; font-weight: 700; margin-bottom: 15px; flex-shrink: 0; font-size: 22px; }
             #celeb-select-all-label {
@@ -1136,56 +1321,44 @@
             #dashboard-footer-buttons #btn-donate { background-color: #22c55e; }
             #auto-celeb-footer-buttons {
                 display: flex;
-                justify-content: space-between;
                 gap: 8px;
                 padding: 8px 0;
                 margin-top: 6px;
                 flex-wrap: nowrap;
             }
             #auto-celeb-footer-buttons .footer-btn {
-                border: none;
-                border-radius: 18px;
-                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 14px;
+                color: #a1a1aa;
                 cursor: pointer;
-                font-weight: 700;
-                font-size: 12px;
-                transition: transform 0.25s ease, box-shadow 0.25s ease;
+                font-weight: 600;
+                font-size: 13px;
+                transition: all 0.25s ease;
                 display: flex;
-                flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                gap: 6px;
-                padding: 14px 12px;
-                letter-spacing: 0.5px;
+                gap: 8px;
+                padding: 12px;
                 position: relative;
                 overflow: hidden;
-                flex: 1 1 0;
-                min-width: 0;
+                flex: 1;
+                background: rgba(255, 255, 255, 0.05);
             }
             #auto-celeb-footer-buttons .footer-btn > * { position: relative; z-index: 1; }
-            #auto-celeb-footer-buttons .footer-btn::after {
-                content: '';
-                position: absolute;
-                inset: 0;
-                background: linear-gradient(0deg, rgba(255,255,255,0.15), transparent);
-                opacity: 0;
-                transition: opacity 0.3s ease;
-            }
             #auto-celeb-footer-buttons .footer-btn:hover {
                 transform: translateY(-2px);
-                box-shadow: 0 18px 30px rgba(0,0,0,0.35);
+                box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+                color: white;
             }
-            #auto-celeb-footer-buttons .footer-btn:hover::after { opacity: 1; }
             .footer-btn-icon {
-                width: 22px; height: 22px;
+                width: 20px; height: 20px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
             }
             .footer-btn-icon svg { width: 100%; height: 100%; }
-            #btn-main-update { background: linear-gradient(135deg, #38bdf8, #2563eb); }
-            #btn-main-bug-report { background: linear-gradient(135deg, #f97316, #d97706); }
-            #btn-main-donate { background: linear-gradient(135deg, #34d399, #059669); }
+            #auto-celeb-footer-buttons #btn-main-bug-report:hover { background: #f97316; border-color: #fb923c; }
+            #auto-celeb-footer-buttons #btn-main-donate:hover { background: #10b981; border-color: #34d399; }
 
             #auto-celeb-popup-container {
                 position: fixed; top: 80px; right: 25px; z-index: 10000;
@@ -1244,6 +1417,15 @@
                 width: 48px; height: 48px; color: #f59e0b; margin-bottom: 5px;
                 filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.5));
             }
+
+            /* Conditional shift when running */
+            body.auto-celeb-running #auto-celeb-main-container {
+                left: 15px; /* Original 20px -> Shift left by 5px */
+            }
+            body.auto-celeb-running #celeb-dashboard-modal,
+            body.auto-celeb-running #modal-information {
+                left: 377px !important; /* Original 385px -> Shift left by 8px */
+            }
             #login-notice-title { font-size: 18px; font-weight: 700; margin: 0; color: #f0f0f0; }
             #login-notice-message { font-size: 14px; color: #b0b0b0; line-height: 1.5; margin: 0; max-width: 280px; }
         `;
@@ -1275,125 +1457,122 @@
             .redirect-notice-button:hover {
                 background: rgba(255,255,255,0.1); border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd;
             }
+            /* Loading Spinner */
+            #auto-celeb-loader {
+                display: none; /* Hidden by default */
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 20px;
+                gap: 15px;
+            }
+            .loader-spinner {
+                width: 48px;
+                height: 48px;
+                border: 5px solid rgba(255, 255, 255, 0.2);
+                border-bottom-color: #f472b6;
+                border-radius: 50%;
+                display: inline-block;
+                box-sizing: border-box;
+                animation: rotation 1s linear infinite;
+            }
+            #auto-celeb-loader p {
+                color: #a1a1aa;
+                font-weight: 600;
+                font-size: 14px;
+                margin: 0;
+            }
+            @keyframes rotation {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            /* INLINE UPDATE NOTICE */
+            #auto-celeb-update-notice {
+                display: none; /* Hidden by default */
+                flex-direction: column; align-items: center; gap: 15px; padding: 20px;
+                background: linear-gradient(145deg, rgba(30, 30, 35, 0.8), rgba(20, 20, 25, 0.8));
+                border: 1px solid rgba(236, 72, 153, 0.6); border-radius: 12px; text-align: center;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            }
+            #update-notice-icon {
+                width: 48px; height: 48px; color: #f472b6; margin-bottom: 5px;
+                filter: drop-shadow(0 0 8px rgba(236, 72, 153, 0.5));
+            }
+            #update-notice-title { font-size: 18px; font-weight: 700; margin: 0; color: #f0f0f0; }
+            #update-notice-message { font-size: 14px; color: #b0b0b0; line-height: 1.5; margin: 0; max-width: 280px; }
+            #update-notice-message strong { color: #f9a8d4; font-weight: 700; }
+            #update-notice-buttons { display: flex; gap: 12px; width: 100%; margin-top: 10px; }
+            .update-notice-button {
+                flex: 1; text-decoration: none; color: white; font-weight: 600; font-size: 14px;
+                padding: 12px 10px; border-radius: 12px; transition: all 0.2s ease;
+                cursor: pointer;
+            }
+            #update-notice-install-btn {
+                border: 1px solid rgba(236,72,153,0.6);
+                box-shadow: 0 0 25px rgba(236,72,153,0.25), inset 0 0 15px rgba(236,72,153,0.15);
+                background: radial-gradient(circle at top left, rgba(236,72,153,0.25), transparent 55%), radial-gradient(circle at top right, rgba(244,114,182,0.25), transparent 55%), rgba(26, 9, 23, 0.7);
+                animation: pulse-close 1.6s ease-in-out infinite;
+                color: #fbcfe8;
+            }
+            #update-notice-install-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 35px rgba(236, 72, 153, 0.5);
+                filter: brightness(1.15);
+                text-decoration: none; /* Đảm bảo không có gạch chân khi di chuột */
+            }
+            #update-notice-copy-btn { border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); }
+            #update-notice-copy-btn:hover { background: rgba(255,255,255,0.2); }
+            .update-notice-button.copied { background-color: #22c55e; border-color: #16a34a; color: white; cursor: default; }
+            .update-notice-button.copied:hover { background-color: #22c55e; border-color: #16a34a; color: white; }
 
-            /* --- MOBILE RESPONSIVE STYLES (UPDATED) --- */
-            @media (max-width: 600px) { /* Increased breakpoint to catch larger phones */
-                /* Main Container Scaling */
+            /* --- MOBILE RESPONSIVE & LAYOUT FIXES --- */
+            @media (max-width: 768px) {
                 #auto-celeb-main-container {
-                    width: calc(100vw - 24px);
-                    left: 50%;
-                    transform: translateX(-50%);
-                    top: 60px;
-                    padding: 12px 14px;
-                    border-radius: 20px;
-                    max-width: none;
-                }
-                
-                /* Header */
-                #auto-celeb-popup-header { padding: 8px; }
-                #auto-celeb-title-icon { width: 38px; height: 38px; }
-                #auto-celeb-title-icon svg { width: 20px; height: 20px; }
-                #auto-celeb-app-name { font-size: 15px; }
-                #auto-celeb-version-badge { font-size: 9px; padding: 1px 6px; }
-
-                /* Action Buttons */
-                .auto-celeb-action-btn { min-height: 50px; padding: 10px; }
-                .action-btn-icon-wrapper { width: 32px; height: 32px; margin-right: 8px; border-radius: 10px; }
-                .action-btn-icon-wrapper svg { width: 16px; height: 16px; }
-                .action-btn-label { font-size: 12px; }
-                .action-btn-subtitle { font-size: 9px; }
-                .action-btn-chevron-circle { width: 20px; height: 20px; margin-left: 5px; }
-                .action-btn-chevron { width: 12px; height: 12px; }
-
-                /* Footer */
-                #auto-celeb-footer-buttons { gap: 6px; margin-top: 5px; }
-                #auto-celeb-footer-buttons .footer-btn { padding: 8px 4px; font-size: 9px; }
-                .footer-btn-icon { width: 14px; height: 14px; }
-
-                /* DASHBOARD MODAL (Horizontal Layout on Mobile) */
-                #celeb-dashboard-modal, #modal-information {
-                    width: 96vw !important;
-                    max-width: 96vw !important;
-                    left: 50% !important;
-                    top: 50% !important;
-                    transform: translate(-50%, -50%) !important;
-                    padding: 10px !important;
-                    padding-top: 35px !important;
-                    max-height: 92vh;
-                    overflow: hidden;
-                    border-radius: 12px !important;
-                }
-                
-                #modal-dashboard-layout {
-                    flex-direction: row !important; /* Force Horizontal */
-                    gap: 8px;
-                    height: 100%;
-                    margin-top: 0;
+                    width: calc(100vw - 24px) !important;
+                    max-width: none !important;
+                    left: 12px !important;
+                    right: 12px !important;
+                    /* Expanded state always at top */
+                    top: 15px !important;
+                    transform: none !important;
                 }
 
-                /* Left Col */
-                #modal-celeb-list-wrapper {
-                    flex: 1.2; /* Slightly narrower list */
-                    border-right: 1px solid rgba(255,255,255,0.1);
-                    padding-right: 4px;
-                    min-height: 0;
-                    overflow-y: auto;
-                    display: flex;
-                    flex-direction: column;
+                /* Collapsed State: Circular Floating Logo */
+                #auto-celeb-main-container.collapsed {
+                    width: 56px !important;
+                    height: 56px !important;
+                    border-radius: 50% !important;
+                    padding: 0 !important;
+                    overflow: hidden !important;
+                    background: rgba(20, 20, 20, 0.9) !important;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
+                    /* Allow dragging position */
+                    top: auto;
                 }
-                #modal-celeb-list-wrapper h3 { font-size: 13px; margin-bottom: 6px; }
-                
-                #celeb-select-all-label { padding: 5px; flex-direction: column; align-items: flex-start; gap: 4px; }
-                #celeb-select-all-text { font-size: 10px; }
-                #celeb-selected-count { font-size: 8px; padding: 1px 4px; display: none; } /* Hide count text if too small */
-                .select-all-toggle { transform: scale(0.6); transform-origin: right center; margin: -20px 0 0 auto; }
-                #celeb-selection-list { padding-right: 2px; }
-
-                .celeb-list-item-new { padding: 6px; margin-bottom: 4px; border-radius: 8px; }
-                .celeb-list-item-main { gap: 8px; }
-                .celeb-list-profile-image img { width: 28px; height: 28px; border-radius: 8px; }
-                .celeb-list-icon { width: 12px; height: 12px; font-size: 8px; right: -3px; bottom: -3px; }
-                .celeb-list-profile-name { font-size: 10px; max-width: 60px; }
-                .celeb-list-progress { height: 4px; }
-                .celeb-list-progress-text { font-size: 8px; }
-                .celeb-item-toggle-wrapper { transform: scale(0.6); transform-origin: right center; margin-left: 2px; }
-
-                /* Right Col */
-                #modal-celeb-controls-wrapper {
-                    flex: 1.8; /* Wider controls */
-                    min-height: 0;
-                    overflow-y: auto;
-                    gap: 6px;
-                    padding-bottom: 10px;
+                #auto-celeb-main-container.collapsed #auto-celeb-popup-header {
+                    padding: 0 !important; width: 100% !important; height: 100% !important;
+                    justify-content: center !important; background: transparent !important;
+                    box-shadow: none !important;
                 }
-                
-                #dashboard-control-button { padding: 8px; font-size: 11px; }
-                
-                /* Timer */
-                #dashboard-timer-ui { height: 40px; padding: 4px; }
-                #dashboard-timer-ui #timer-display { font-size: 16px; min-width: 40px; }
-                #dashboard-timer-ui #timer-progress-ring { width: 20px; height: 20px; }
-                .timer-adjust-btn { font-size: 9px; min-width: 20px; padding: 2px; }
-                #dashboard-timer-ui #timer-toggle-switch { transform: scale(0.6); transform-origin: right center; width: 35px; }
+                #auto-celeb-main-container.collapsed #auto-celeb-title-icon {
+                    width: 100% !important; height: 100% !important; border-radius: 50% !important;
+                    box-shadow: none !important; margin: 0 !important;
+                }
+                #auto-celeb-main-container.collapsed #auto-celeb-title-info,
+                #auto-celeb-main-container.collapsed .lc-ambient-glow { display: none !important; }
 
-                /* Chart */
-                #running-chart-container { height: 60px; }
-                #running-stats-container { padding: 6px; }
-                #running-stats-container p { font-size: 9px; margin: 1px 0; }
-                
-                /* Logs */
-                #dashboard-log-wrapper { margin-top: 4px; min-height: 60px; }
-                #dashboard-log-wrapper label { font-size: 9px; }
-                #dashboard-script-log { font-size: 9px; padding: 4px; line-height: 1.2; }
-                
-                /* Info Modal specific */
-                #info-panel-tabs { gap: 4px; overflow-x: auto; padding-bottom: 4px; }
-                .info-celeb-item { padding: 6px; gap: 8px; border-radius: 12px; }
-                .info-celeb-avatar-wrapper img { width: 32px; height: 32px; }
-                .info-celeb-details .name { font-size: 11px; }
-                .info-celeb-details .uid { font-size: 9px; }
-                .info-celeb-status-btn { padding: 4px 6px; font-size: 9px; }
-                .info-tab-button { padding: 6px 8px; font-size: 10px; white-space: nowrap; }
+                /* Horizontal Tools Layout */
+                #auto-celeb-actions-wrapper {
+                    flex-direction: row !important;
+                    overflow-x: auto;
+                    padding-bottom: 5px;
+                }
+                .auto-celeb-action-btn {
+                    min-width: 160px;
+                    flex: 0 0 auto; /* Prevent shrinking */
+                }
+
+                /* Modals will be positioned via JS or fixed bottom/below */
             }
         `;
         document.head.appendChild(style);
@@ -1559,25 +1738,59 @@
         }
     }
 
+    function checkSuccessStatus() {
+        if (!processedCelebs || !processedCelebs.length) return;
+
+        let changed = false;
+        processedCelebs.forEach(celeb => {
+            if (successfulCelebIds.has(celeb.id)) return;
+
+            const parentEl = document.getElementById(celeb.id + '_parentElement');
+            if (!parentEl) return;
+
+            const profileCard = parentEl.closest('.profile');
+            if (!profileCard) return;
+
+            const btn = profileCard.querySelector('button.showMoreBtn');
+            if (btn) {
+                const text = btn.textContent.trim();
+                // Check for success states: "Đã gửi lời mời" (Request sent) or "Bạn bè" (Friend)
+                if (text.includes('Đã gửi lời mời') || text.includes('Bạn bè') || text.includes('Request sent') || text.includes('Friends')) {
+                    successfulCelebIds.add(celeb.id);
+                    runSuccessCount++;
+                    changed = true;
+                }
+            }
+        });
+
+        if (changed) {
+            updateStatsDisplay();
+            updateSuccessCelebsDisplay();
+            saveRunStats();
+        }
+    }
+
     function incrementConnectionLostCount() {
         runConnectionLostCount++;
-        localStorage.setItem('autoCelebConnectionLostCount', runConnectionLostCount.toString());
+        saveRunStats();
         updateStatsDisplay();
     }
 
     function incrementAutoResetCount() {
         runAutoResetCount++;
-        localStorage.setItem('autoCelebAutoResetCount', runAutoResetCount.toString());
+        saveRunStats();
         updateStatsDisplay();
     }
 
     function updateStatsDisplay() {
         const sentEl = document.getElementById('stat-sent');
+        const successEl = document.getElementById('stat-success');
         const timeEl = document.getElementById('stat-time');
         const errorEl = document.getElementById('stat-error');
         const resetEl = document.getElementById('stat-reset');
 
         if (sentEl) sentEl.textContent = runSentCount.toString();
+        if (successEl) successEl.textContent = runSuccessCount.toString();
         if (errorEl) errorEl.textContent = runConnectionLostCount.toString(); // Lỗi = số lần mất kết nối
         if (resetEl) resetEl.textContent = runAutoResetCount.toString(); // Reset = số lần auto reset
         updateRunTimer();
@@ -1601,6 +1814,7 @@
         const listWrapper = document.getElementById('modal-celeb-list-wrapper');
         if (!listWrapper) return;
 
+        listWrapper.style.overflow = 'hidden'; // Ngăn vỡ layout khi chạy
         listWrapper.innerHTML = `
             <div id="running-view-wrapper">
                 <div id="running-chart-container" onmouseenter="document.getElementById('chart-tooltip-info').style.display='block';" onmouseleave="document.getElementById('chart-tooltip-info').style.display='none';">
@@ -1620,14 +1834,21 @@
 
                 <div id="running-stats-container">
                     <p><strong>Đã gửi:</strong> <span id="stat-sent">0</span></p>
+                    <p><strong>Thành công:</strong> <span id="stat-success" style="color: #34d399;">0</span></p>
                     <p><strong>Thời gian:</strong> <span id="stat-time">00:00:00</span></p>
                     <p><strong>Mất kết nối:</strong> <span id="stat-error">0</span></p>
                     <p><strong>Reset:</strong> <span id="stat-reset">0</span></p>
                 </div>
 
-                <div id="processed-celebs-container">
-                    <p><strong>Đã xử lý:</strong></p>
-                    <div id="processed-celebs-list"></div>
+                <div id="running-lists-container" style="display: flex; gap: 10px; margin-top: 15px;">
+                    <div id="processed-celebs-container" style="flex: 1.8; min-width: 0; max-width: 240px;">
+                        <p><strong>Đã xử lý:</strong></p>
+                        <div id="processed-celebs-list"></div>
+                    </div>
+                    <div id="success-celebs-container" style="flex: 1; min-width: 0; max-width: 160px;">
+                        <p><strong>Thành công:</strong></p>
+                        <div id="success-celebs-list"></div>
+                    </div>
                 </div>
             </div>
         `;
@@ -1639,6 +1860,7 @@
             logWrapper.style.display = 'flex';
         }
         updateProcessedCelebsDisplay();
+        updateSuccessCelebsDisplay();
     }
 
     function updateProcessedCelebsDisplay() {
@@ -1658,6 +1880,21 @@
         container.scrollLeft = container.scrollWidth;
 
         // Setup drag to scroll
+        setupDragToScroll(container);
+    }
+
+    function updateSuccessCelebsDisplay() {
+        const container = document.getElementById('success-celebs-list');
+        if (!container) return;
+
+        const list = processedCelebs.filter(c => successfulCelebIds.has(c.id));
+
+        const displayHtml = list.map(celeb => `
+            <img src="${celeb.imgSrc}" alt="${celeb.name}" title="${celeb.name}" class="processed-celeb-item" draggable="false" style="border-color: #34d399;">
+        `).join('');
+
+        container.innerHTML = displayHtml;
+        container.scrollLeft = container.scrollWidth;
         setupDragToScroll(container);
     }
 
@@ -1739,9 +1976,73 @@
          }
      }
 
+    function makeDraggable(element) {
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        const header = document.getElementById('auto-celeb-popup-header');
+
+        if (header) {
+            header.onmousedown = dragMouseDown;
+            header.ontouchstart = dragTouchStart;
+        }
+
+        function dragMouseDown(e) {
+            // Only allow dragging if collapsed or on desktop if desired, but user requested for phone collapsed
+            if (!element.classList.contains('collapsed') && window.innerWidth <= 768) return;
+
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }
+
+        function elementDrag(e) {
+            e.preventDefault();
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            element.style.top = (element.offsetTop - pos2) + "px";
+            element.style.left = (element.offsetLeft - pos1) + "px";
+            element.style.right = 'auto'; // Clear right to allow movement
+        }
+
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+            document.ontouchend = null;
+            document.ontouchmove = null;
+        }
+
+        function dragTouchStart(e) {
+            if (!element.classList.contains('collapsed') && window.innerWidth <= 768) return;
+            const touch = e.touches[0];
+            pos3 = touch.clientX;
+            pos4 = touch.clientY;
+            document.ontouchend = closeDragElement;
+            document.ontouchmove = elementTouchDrag;
+        }
+
+        function elementTouchDrag(e) {
+            // e.preventDefault(); // Commented to allow scrolling if needed, but for drag usually we prevent
+            const touch = e.touches[0];
+            pos1 = pos3 - touch.clientX;
+            pos2 = pos4 - touch.clientY;
+            pos3 = touch.clientX;
+            pos4 = touch.clientY;
+            element.style.top = (element.offsetTop - pos2) + "px";
+            element.style.left = (element.offsetLeft - pos1) + "px";
+            element.style.right = 'auto';
+        }
+    }
+
     function createMainControlUI() {
         const container = document.createElement('div');
         container.id = 'auto-celeb-main-container';
+
+        if (localStorage.getItem(CONFIG.COLLAPSE_STATE_KEY) === 'true') {
+            container.classList.add('collapsed');
+        }
 
         container.innerHTML = `
             <span class="lc-ambient-glow glow-top"></span>
@@ -1769,9 +2070,9 @@
             </div>
         `;
 
-        const isCelebPage = window.location.href === CONFIG.TARGET_PAGE;
-        const isFriendPage = window.location.href === CONFIG.FRIENDS_PAGE;
-        const isLoginPage = window.location.href === CONFIG.LOGIN_PAGE;
+        const isCelebPage = window.location.href.startsWith(CONFIG.TARGET_PAGE);
+        const isFriendPage = window.location.href.startsWith(CONFIG.FRIENDS_PAGE);
+        const isLoginPage = window.location.href.startsWith(CONFIG.LOGIN_PAGE);
 
         const tabNav = document.createElement('div');
         tabNav.id = 'auto-celeb-tab-nav';
@@ -1807,7 +2108,7 @@
             <h3 id="key-wall-title">Kích hoạt Script</h3>
             <p id="key-wall-message">Để sử dụng script, vui lòng nhập key kích hoạt.<br>Truy cập kênh chat messenger để nhận key.</p>
             <a id="btn-get-key" href="${CONFIG.MESSENGER_LINK}" target="_blank">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;"><path d="M12 0C5.373 0 0 5.373 0 12C0 18.627 5.373 24 12 24C18.627 24 24 18.627 24 12C24 5.373 18.627 0 12 0ZM10.33 17.89L7.47 15.03L12.53 9.97L15.39 12.83L10.33 17.89ZM16.53 11.69L14.25 9.41L11.39 6.55L14.25 3.69L19.31 8.75L16.53 11.69Z"></path></svg>
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;"><path d="M3.5 11.5a3.5 3.5 0 1 1 3.163-5H14L15.5 8 14 9.5l-1-1-1 1-1-1-1 1-1-1-1 1H6.663a3.5 3.5 0 0 1-3.163 2zM2.5 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>
                 Lấy Key tại Messenger
             </a>
             <input type="text" id="key-input-field" placeholder="Nhập key...">
@@ -1815,6 +2116,32 @@
             <p id="key-error-message">Key không hợp lệ. Vui lòng thử lại.</p>
         `;
         container.appendChild(keyWall);
+
+        const loader = document.createElement('div');
+        loader.id = 'auto-celeb-loader';
+        loader.innerHTML = `
+            <div class="loader-spinner"></div>
+            <p>Đang kiểm tra phiên bản...</p>
+        `;
+        container.appendChild(loader);
+
+        const updateNotice = document.createElement('div');
+        updateNotice.id = 'auto-celeb-update-notice';
+        updateNotice.style.display = 'none';
+        updateNotice.innerHTML = `
+            <div id="update-notice-header">
+                <svg id="update-notice-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                <h4 id="update-notice-title">Có phiên bản mới!</h4>
+            </div>
+            <p id="update-notice-message"></p>
+            <div id="update-notice-buttons">
+                <a id="update-notice-install-btn" href="${CONFIG.UPDATE_URL}" target="_blank" class="update-notice-button">Cài đặt ngay</a>
+                <button id="update-notice-copy-btn" class="update-notice-button">Copy Link</button>
+            </div>
+        `;
+        container.appendChild(updateNotice);
 
         if (isCelebPage) {
             const actionsWrapper = document.createElement('div');
@@ -1856,12 +2183,6 @@
             const footerButtons = document.createElement('div');
             footerButtons.id = 'auto-celeb-footer-buttons';
             footerButtons.innerHTML = `
-                <button id="btn-main-update" class="footer-btn">
-                    <span class="footer-btn-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                    </span>
-                    <span>Cập nhật</span>
-                </button>
                 <button id="btn-main-bug-report" class="footer-btn">
                     <span class="footer-btn-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
@@ -1885,12 +2206,6 @@
             const footerButtons = document.createElement('div');
             footerButtons.id = 'auto-celeb-footer-buttons';
             footerButtons.innerHTML = `
-                <button id="btn-main-update" class="footer-btn">
-                    <span class="footer-btn-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                    </span>
-                    <span>Cập nhật</span>
-                </button>
                 <button id="btn-main-bug-report" class="footer-btn">
                     <span class="footer-btn-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
@@ -2006,11 +2321,11 @@
                         <button class="info-tab-button" data-tab="pending">Hàng chờ (0)</button>
                         <button class="info-tab-button" data-tab="available">Còn slot (0)</button>
                         <button class="info-tab-button" data-tab="full">Hết slot (0)</button>
+                        <button class="info-tab-button" data-tab="others">Khác (0)</button>
                     </div>
                     <div id="info-panel-list">
                         <div style="text-align:center; padding: 50px; color: #777;">
-                            <p>Đang quét dữ liệu...</p>
-                            <p style="font-size:12px;">Vui lòng chờ trong giây lát.</p>
+                            <p>Đang tải dữ liệu...</p>
                         </div>
                     </div>
                 </div>
@@ -2021,20 +2336,6 @@
                 <h3>Báo lỗi</h3>
                 <p>Nếu bạn gặp lỗi, vui lòng báo cho tôi qua Messenger:</p>
                 <a href="${CONFIG.MESSENGER_LINK}" target="_blank" class="modal-button">Chat trên Messenger</a>
-            </div>
-
-            <div id="modal-update" class="auto-celeb-modal" style="display: none;">
-                <span class="auto-celeb-modal-close">&times;</span>
-                <h3>Cập nhật phiên bản</h3>
-                <div class="modal-update-version-display">
-                    <img src="${CONFIG.LOGO_URL}" class="modal-update-logo" alt="Logo">
-                    <span class="modal-update-title-text">Locket Celebrity ${CONFIG.SCRIPT_VERSION}</span>
-                </div>
-                <p class="update-text">Vui lòng cập nhật phiên bản mới.</p>
-                <div class="modal-button-group">
-                    <a id="btn-go-to-update" href="${CONFIG.UPDATE_URL}" target="_blank" class="modal-button">Cài đặt</a>
-                    <button id="btn-copy-update-link" class="modal-button">Copy Link</button>
-                </div>
             </div>
 
             <div id="modal-processed-list" class="auto-celeb-modal" style="display: none;">
@@ -2176,33 +2477,126 @@
 
     function setupMainUIControls() {
         const mainContainer = document.getElementById('auto-celeb-main-container');
-        const collapseToggle = document.getElementById('auto-celeb-collapse-toggle');
         const headerContent = document.getElementById('auto-celeb-header-content');
-        const toggleCollapse = (e) => { mainContainer.classList.toggle('collapsed'); };
-        if (collapseToggle && mainContainer) { collapseToggle.addEventListener('click', toggleCollapse); }
+        const toggleCollapse = (e) => {
+            mainContainer.classList.toggle('collapsed');
+            const isCollapsed = mainContainer.classList.contains('collapsed');
+            localStorage.setItem(CONFIG.COLLAPSE_STATE_KEY, isCollapsed);
+
+            // Reset position if expanding on mobile to ensure it goes to top
+            if (!isCollapsed && window.innerWidth <= 768) {
+                mainContainer.style.top = '15px';
+                mainContainer.style.left = '12px';
+            }
+
+            // Nếu thu nhỏ, đóng tất cả các bảng điều khiển đang mở
+            if (isCollapsed) {
+                const dashboardModal = document.getElementById('celeb-dashboard-modal');
+                const infoModal = document.getElementById('modal-information');
+                const openDashboardButton = document.getElementById('auto-celeb-open-dashboard-btn');
+                const infoButton = document.getElementById('auto-celeb-info-btn');
+
+                // Đóng Bảng Điều Khiển nếu đang mở
+                if (dashboardModal && dashboardModal.style.display !== 'none') {
+                    dashboardModal.style.display = 'none';
+                    if (openDashboardButton) {
+                        const label = openDashboardButton.querySelector('.action-btn-label');
+                        if(label) label.textContent = 'Mở Bảng Điều Khiển';
+                        openDashboardButton.classList.remove('close-mode');
+                        const chevron = openDashboardButton.querySelector('.action-btn-chevron');
+                        if (chevron) chevron.innerHTML = `<path d="m9 18 6-6-6-6"/>`; // >
+                    }
+                }
+
+                // Đóng Bảng Thống Kê nếu đang mở
+                if (infoModal && infoModal.style.display !== 'none') {
+                    infoModal.style.display = 'none';
+                    if (infoButton) {
+                        const label = infoButton.querySelector('.action-btn-label');
+                        if(label) label.textContent = 'Mở Bảng Thống Kê';
+                        infoButton.classList.remove('close-mode');
+                        infoButton.classList.add('card-indigo');
+                        const chevron = infoButton.querySelector('.action-btn-chevron');
+                        if (chevron) chevron.innerHTML = `<path d="m9 18 6-6-6-6"/>`; // >
+                        if (infoPanelScanInterval) { clearInterval(infoPanelScanInterval); infoPanelScanInterval = null; }
+                    }
+                }
+            }
+        };
         if (headerContent && mainContainer) { headerContent.addEventListener('click', toggleCollapse); }
 
         const btnSubmitKey = document.getElementById('btn-submit-key');
         const keyInput = document.getElementById('key-input-field');
         const keyError = document.getElementById('key-error-message');
-        const validateKey = () => {
+        const validateKey = async () => {
             const inputVal = keyInput.value.trim();
-            if (inputVal === CONFIG.SECRET_KEY) {
-                localStorage.setItem(CONFIG.KEY_STORAGE_KEY, inputVal);
-                showToastNotification('Kích hoạt thành công! Đang tải lại trang...', 'success', 3000);
-                 keyError.style.display = 'none';
-                 setTimeout(() => {
-                     location.reload();
-                 }, 2000);
-            } else {
+            if (!inputVal) {
+                keyError.textContent = 'Vui lòng nhập key.';
+                keyError.style.display = 'block';
+                return;
+            }
+
+            btnSubmitKey.disabled = true;
+            btnSubmitKey.textContent = 'Đang xác thực...';
+
+            try {
+                const apiData = await fetchApiData();
+                if (!apiData || apiData.length === 0) {
+                    throw new Error('Không nhận được dữ liệu hợp lệ từ API.');
+                }
+
+                // Lọc ra tất cả các phiên bản đang "Mở"
+                const openVersions = apiData.filter(entry => entry.status === 'Mở');
+
+                // Nếu không có phiên bản nào đang mở, thông báo tạm dừng
+                if (openVersions.length === 0) {
+                    throw new Error('Công cụ đang tạm dừng hoạt động. Vui lòng quay lại sau.');
+                }
+
+                // Tìm phiên bản mới nhất trong số các phiên bản đang mở
+                const latestActiveEntry = openVersions.sort((a, b) => b.stt - a.stt)[0];
+
+                if (inputVal === String(latestActiveEntry.key)) {
+                    localStorage.setItem(CONFIG.KEY_STORAGE_KEY, inputVal);
+                    showToastNotification('Kích hoạt thành công! Đang tải lại trang...', 'success', 3000);
+                    keyError.style.display = 'none';
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    throw new Error('Key không hợp lệ. Vui lòng thử lại.');
+                }
+            } catch (error) {
+                keyError.textContent = error.message;
                 keyError.style.display = 'block';
                 keyInput.classList.add('shake');
                 setTimeout(() => keyInput.classList.remove('shake'), 300);
+                btnSubmitKey.disabled = false;
+                btnSubmitKey.textContent = 'Xác thực Key';
             }
         };
         if(btnSubmitKey && keyInput && keyError) {
             btnSubmitKey.addEventListener('click', validateKey);
             keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { validateKey(); } });
+        }
+
+        // Event listener for the new inline update copy button
+        const btnCopyUpdateInline = document.getElementById('update-notice-copy-btn');
+        if (btnCopyUpdateInline) {
+            btnCopyUpdateInline.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (btnCopyUpdateInline.classList.contains('copied')) return;
+                navigator.clipboard.writeText(CONFIG.UPDATE_URL).then(() => {
+                    const originalText = btnCopyUpdateInline.textContent;
+                    btnCopyUpdateInline.textContent = 'Đã copy!';
+                    btnCopyUpdateInline.classList.add('copied');
+                    setTimeout(() => {
+                        btnCopyUpdateInline.textContent = originalText;
+                        btnCopyUpdateInline.classList.remove('copied');
+                    }, 2000);
+                }).catch(err => {
+                    console.error('[Auto Locket Celeb] Lỗi khi copy link: ', err);
+                    alert('Lỗi khi copy. Vui lòng thử lại.');
+                });
+            });
         }
 
         // Ngăn chặn việc tải lại trang khi nhấp vào tab đang active
@@ -2296,7 +2690,6 @@
 
         const modalOverlay = document.getElementById('auto-celeb-modal-overlay');
         const modalBug = document.getElementById('modal-bug-report');
-        const modalUpdate = document.getElementById('modal-update');
         const modalDonate = document.getElementById('modal-donate');
         const modalProcessed = document.getElementById('modal-processed-list');
         const allCloseButtons = document.querySelectorAll('.auto-celeb-modal-close');
@@ -2304,14 +2697,12 @@
         const closeOnlyPopupModals = () => {
             if (modalOverlay) modalOverlay.style.display = 'none';
             if (modalBug) modalBug.style.display = 'none';
-            if (modalUpdate) modalUpdate.style.display = 'none';
             // Không cần đóng modalInfo ở đây vì nó được quản lý riêng
             if (modalDonate) modalDonate.style.display = 'none';
             if (modalProcessed) modalProcessed.style.display = 'none';
         };
 
         const btnGenerateQR = document.getElementById('btn-generate-qr');
-        const btnMainUpdate = document.getElementById('btn-main-update');
         const btnMainBugReport = document.getElementById('btn-main-bug-report');
         const btnMainDonate = document.getElementById('btn-main-donate');
 
@@ -2330,6 +2721,18 @@
 
             if (show) {
                 infoModal.style.display = 'block';
+
+                // Mobile positioning logic
+                if (window.innerWidth <= 768) {
+                    const container = document.getElementById('auto-celeb-main-container');
+                    const rect = container.getBoundingClientRect();
+                    const topPos = rect.bottom + 10;
+                    infoModal.style.top = `${topPos}px`;
+                    infoModal.style.left = '12px';
+                    infoModal.style.width = 'calc(100vw - 24px)';
+                    infoModal.style.maxHeight = `calc(100vh - ${topPos}px - 20px)`;
+                }
+
                 const label = infoButton.querySelector('.action-btn-label');
                 if(label) label.textContent = 'Đóng Bảng Thống Kê';
                 infoButton.classList.add('close-mode');
@@ -2357,9 +2760,6 @@
             // Hàm này không còn cần thiết nữa vì z-index đã được điều chỉnh
         };
 
-        if (btnMainUpdate && modalUpdate && modalOverlay) {
-            btnMainUpdate.addEventListener('click', (e) => { e.preventDefault(); closeAllModalsExcept(modalUpdate); modalOverlay.style.display = 'block'; modalUpdate.style.display = 'block'; });
-        }
         if (btnMainBugReport && modalBug && modalOverlay) {
             btnMainBugReport.addEventListener('click', (e) => { e.preventDefault(); closeAllModalsExcept(modalBug); modalOverlay.style.display = 'block'; modalBug.style.display = 'block'; });
         }
@@ -2378,21 +2778,6 @@
         }
         if (btnGenerateQR) { btnGenerateQR.addEventListener('click', (e) => { e.preventDefault(); generateDonateQR(); }); }
 
-        const btnCopyUpdateLink = document.getElementById('btn-copy-update-link');
-        if (btnCopyUpdateLink) {
-            btnCopyUpdateLink.addEventListener('click', (e) => {
-                e.preventDefault(); if (btnCopyUpdateLink.classList.contains('copied')) return;
-                navigator.clipboard.writeText(CONFIG.UPDATE_URL).then(() => {
-                    const originalText = btnCopyUpdateLink.textContent;
-                    btnCopyUpdateLink.textContent = 'Đã copy!';
-                    btnCopyUpdateLink.classList.add('copied');
-                    setTimeout(() => {
-                        btnCopyUpdateLink.textContent = originalText;
-                        btnCopyUpdateLink.classList.remove('copied');
-                    }, 2000);
-                }).catch(err => { console.error('[Auto Locket Celeb] Lỗi khi copy link: ', err); alert('Lỗi khi copy. Vui lòng thử lại.'); });
-            });
-        }
         const donateInput = document.getElementById('donate-amount-input');
         if (donateInput) {
             donateInput.addEventListener('input', (e) => {
@@ -2409,6 +2794,9 @@
             });
         }
         allCloseButtons.forEach(btn => btn.addEventListener('click', closeOnlyPopupModals));
+
+        // Enable dragging
+        makeDraggable(mainContainer);
     }
 
     function scanCelebsForInfoPanel() {
@@ -2426,13 +2814,39 @@
             const percent = max > 0 ? Math.min(100, (current / max) * 100) : 0;
 
             const btn = card.querySelector('button.showMoreBtn');
-            let status = 'unknown';
-            let statusText = '';
+            let status, statusText;
+
             if (btn) {
                 const btnText = btn.textContent.trim();
-                if (btnText.includes('Thêm bạn bè')) { status = 'add'; statusText = 'Thêm bạn bè'; }
-                else if (btnText.includes('Đã gửi lời mời')) { status = 'pending'; statusText = 'Đã gửi lời mời'; }
-                else if (btnText.includes('Bạn bè')) { status = 'friend'; statusText = 'Bạn bè'; }
+                if (btnText.includes('Bạn bè')) {
+                    status = 'friend';
+                    statusText = 'Bạn bè';
+                    knownCelebStatuses[id] = 'friend'; // Cập nhật cache
+                } else if (btnText.includes('Đã gửi lời mời')) {
+                    status = 'pending';
+                    statusText = 'Đã gửi lời mời';
+                    knownCelebStatuses[id] = 'pending'; // Cập nhật cache
+                } else { // Nút là 'Thêm bạn bè'
+                    status = 'add';
+                    statusText = 'Thêm bạn bè';
+                    // Nếu trạng thái đã biết trước đó là friend/pending, xóa nó đi vì đã có sự thay đổi
+                    if (knownCelebStatuses[id]) {
+                        delete knownCelebStatuses[id];
+                    }
+                }
+            } else {
+                // Khi nút biến mất (thường do auto-celeb đang chạy), tin tưởng vào cache
+                if (knownCelebStatuses[id] === 'friend') {
+                    status = 'friend';
+                    statusText = 'Bạn bè';
+                } else if (knownCelebStatuses[id] === 'pending') {
+                    status = 'pending';
+                    statusText = 'Đã gửi lời mời';
+                } else {
+                    // Nếu không có trong cache, mặc định là 'add'
+                    status = 'add';
+                    statusText = 'Thêm bạn bè';
+                }
             }
 
             allCelebs.push({ id, name, imgSrc, current, max, percent, status, statusText });
@@ -2445,31 +2859,44 @@
         friend: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></svg>',
         pending: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></svg>', // Giống icon Bạn bè
         full: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></svg>',
+        external: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32V224H48c-17.7 0-32 14.3-32 32s14.3 32 32 32H192V432c0 17.7 14.3 32 32 32s32-14.3 32-32V288H400c17.7 0 32-14.3 32-32s-14.3-32-32-32H256V80z"/></svg>',
     };
 
-    function renderInfoList(celebs, container) {
+    function renderInfoList(celebs, container, emptyMessage = 'Không có celeb nào trong danh mục này.') {
         if (!celebs.length) {
-            container.innerHTML = '<p style="text-align:center; color:#888; padding: 20px;">Không có celeb nào trong danh mục này.</p>';
+            container.innerHTML = `<p style="grid-column: 1 / -1; text-align:center; color:#888; padding: 20px;">${emptyMessage}</p>`;
             return;
         }
-        container.innerHTML = celebs.map(c => `
+        container.innerHTML = celebs.map(c => {
+            const isExternal = c.status === 'external';
+            const icon = isExternal ? '<span class="heart-icon">❤︎</span>' : '✦';
+            // Đối với celeb ở tab "Khác", chúng ta không hiển thị thanh tiến trình
+            const progressHtml = isExternal ? '' : `
+                <div class="info-celeb-progress-bar"><div style="width: ${c.percent}%;"></div></div>
+                <div class="info-celeb-progress-text">${c.current.toLocaleString()} / ${c.max.toLocaleString()}</div>
+            `;
+
+            // Nút ở tab "Khác" luôn có thể click được
+            const clickableClass = (c.status === 'add' && c.current < c.max) || isExternal ? 'clickable-add' : '';
+            const statusClass = c.status === 'add' && c.current >= c.max ? 'full' : c.status;
+
+            return `
             <div class="info-celeb-item">
                 <div class="info-celeb-avatar-wrapper">
                     <img src="${c.imgSrc}" alt="${c.name}" loading="lazy">
-                    <div class="info-celeb-avatar-icon">✦</div>
+                    <div class="info-celeb-avatar-icon">${icon}</div>
                 </div>
                 <div class="info-celeb-details">
                     <div class="name">${c.name}</div>
                     <div class="uid">@${c.id}</div>
-                    <div class="info-celeb-progress-bar"><div style="width: ${c.percent}%; background: ${c.current >= c.max ? '#dc2626' : '#34c759'};"></div></div>
-                    <div class="info-celeb-progress-text">${c.current.toLocaleString()} / ${c.max.toLocaleString()}</div>
+                    ${progressHtml}
                 </div>
-                <button class="info-celeb-status-btn ${c.status === 'add' && c.current >= c.max ? 'full' : c.status} ${c.status === 'add' && c.current < c.max ? 'clickable-add' : ''}" data-uid="${c.id}">
+                <button class="info-celeb-status-btn ${statusClass} ${clickableClass}" data-uid="${c.id}">
                     ${c.status === 'add' && c.current >= c.max ? STATUS_ICONS.full : (STATUS_ICONS[c.status] || '')}
                     ${c.status === 'add' && c.current >= c.max ? 'Đã đầy' : c.statusText}
                 </button>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     function updateInfoListOptimized(celebs, container) {
@@ -2518,6 +2945,13 @@
 
     function addClickHandlersToInfoPanel(container) {
         container.addEventListener('click', async (e) => {
+            const externalBtn = e.target.closest('.info-celeb-status-btn.external');
+            if (externalBtn) {
+                const uid = externalBtn.dataset.uid;
+                window.open(`https://locket.cam/${uid}`, '_blank');
+                return;
+            }
+
             const clickedButton = e.target.closest('.info-celeb-status-btn.clickable-add');
             if (!clickedButton) return;
 
@@ -2563,43 +2997,88 @@
             }
         });
     }
-    function initializeInfoPanel(isInitialLoad = false, isManualRefresh = false) {
-        const allCelebs = scanCelebsForInfoPanel();
+    async function initializeInfoPanel(isInitialLoad = false, isManualRefresh = false) {
         const tabsContainer = document.getElementById('info-panel-tabs');
         const listContainer = document.getElementById('info-panel-list');
         const refreshBtn = document.getElementById('info-panel-refresh-button');
         const refreshIcon = refreshBtn?.querySelector('.refresh-icon');
+
+        const state = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
 
         if (!tabsContainer || !listContainer) {
             if (infoPanelScanInterval) clearInterval(infoPanelScanInterval);
             return;
         }
 
-        // Nếu không tìm thấy celeb, bắt đầu vòng lặp thử lại
-        if (allCelebs.length === 0) {
-            if (listContainer && (isManualRefresh || isInitialLoad || !listContainer.dataset.loading)) {
-                 listContainer.innerHTML = '<div style="text-align:center; padding: 50px; color: #777;"><p>Đang quét dữ liệu...</p><p style="font-size:12px;">Vui lòng chờ trong giây lát.</p></div>';
-                 listContainer.dataset.loading = 'true';
-            }
-            if (infoPanelScanInterval) clearInterval(infoPanelScanInterval);
+        // Bắt đầu vòng lặp quét liên tục nếu đây là lần tải đầu tiên
+        if (isInitialLoad && !infoPanelScanInterval) {
             infoPanelScanInterval = setInterval(() => {
-                // Gọi lại hàm này, nhưng không phải là lần load đầu tiên nữa
-                initializeInfoPanel(false, false);
-            }, 1000);
-            return;
+                initializeInfoPanel(false, false).catch(console.error);
+            }, 1500); // Quét lại mỗi 1.5 giây để cập nhật các tab DOM
         }
 
-        if (listContainer.dataset.loading === 'true') {
-            listContainer.innerHTML = '';
-            delete listContainer.dataset.loading;
+        if (isInitialLoad || isManualRefresh) {
+            listContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align:center; padding: 50px; color: #777;"><p>Đang tải dữ liệu...</p></div>';
+        }
+
+        // Quét DOM để lấy dữ liệu cho các tab nội bộ (luôn cập nhật)
+        const allCelebs = scanCelebsForInfoPanel();
+
+        // Chỉ tải dữ liệu API cho tab "Khác" khi cần thiết
+        let otherCelebs = [];
+        if (isInitialLoad || isManualRefresh || cachedOtherCelebsData === null) {
+            try {
+                const apiData = await fetchCelebData(isManualRefresh);
+                cachedOtherCelebsData = Array.isArray(apiData) ? apiData : [];
+            } catch (e) {
+                console.error('Lỗi khi tải danh sách celeb khác:', e);
+                if (cachedOtherCelebsData === null) cachedOtherCelebsData = []; // Tránh fetch lại liên tục nếu lỗi
+            }
+        }
+
+        if (cachedOtherCelebsData) {
+            otherCelebs = cachedOtherCelebsData.map(c => {
+                    const existing = allCelebs.find(domC => domC.id === c.uid);
+                    const base = existing || {
+                        id: c.uid,
+                        name: c.name,
+                        imgSrc: c.avatar,
+                        current: 0, max: 0, percent: 0
+                    };
+                    return {
+                        ...base,
+                        status: 'external',
+                        statusText: 'Thêm bạn bè'
+                    };
+                });
         }
 
         const currentActiveTab = tabsContainer.querySelector('.info-tab-button.active')?.dataset.tab || 'friends';
+        let pendingList;
+        if (state.isRunning && cachedPendingCelebs !== null) {
+            // Khi đang chạy, kết hợp danh sách chờ đã cache với danh sách chờ quét trực tiếp từ DOM
+            const livePending = allCelebs.filter(c => c.status === 'pending');
+            const combinedPendingMap = new Map();
+            cachedPendingCelebs.forEach(c => combinedPendingMap.set(c.id, c));
+            livePending.forEach(c => combinedPendingMap.set(c.id, c)); // Ghi đè với dữ liệu mới nhất
+            pendingList = Array.from(combinedPendingMap.values());
+        } else {
+            // Khi không chạy, chỉ sử dụng dữ liệu quét từ DOM
+            pendingList = allCelebs.filter(c => c.status === 'pending');
+        }
+        const pendingIds = new Set(pendingList.map(c => c.id));
+
         const filters = {
             friends: allCelebs.filter(c => c.status === 'friend'),
-            pending: allCelebs.filter(c => c.status === 'pending'),
-            available: allCelebs.filter(c => c.current < c.max),
-            full: allCelebs.filter(c => c.current >= c.max && c.status === 'add')
+            pending: pendingList,
+            available: allCelebs.filter(c => c.current < c.max).map(c => {
+                if (pendingIds.has(c.id)) {
+                    return { ...c, status: 'pending', statusText: 'Đã gửi lời mời' };
+                }
+                return c;
+            }),
+            full: allCelebs.filter(c => c.current >= c.max && c.status === 'add'),
+            others: otherCelebs
         };
 
         const updateTabCounts = () => {
@@ -2607,15 +3086,25 @@
             document.querySelector('.info-tab-button[data-tab="pending"]').textContent = `Hàng chờ (${filters.pending.length})`;
             document.querySelector('.info-tab-button[data-tab="available"]').textContent = `Còn slot (${filters.available.length})`;
             document.querySelector('.info-tab-button[data-tab="full"]').textContent = `Hết slot (${filters.full.length})`;
+            document.querySelector('.info-tab-button[data-tab="others"]').textContent = `Khác (${filters.others.length})`;
         };
 
         const setActiveTab = (tabName) => {
             tabsContainer.querySelectorAll('.info-tab-button').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.tab === tabName);
             });
+            // Add/remove grid class for 'others' tab
+            listContainer.classList.toggle('info-grid-layout', tabName === 'others');
+
             // Luôn xóa sạch list trước khi render lại để tránh lỗi hiển thị đè lên nhau
             listContainer.innerHTML = '';
-            renderInfoList(filters[tabName], listContainer);
+
+            let emptyMsg = 'Không có celeb nào trong danh mục này.';
+            if (allCelebs.length === 0 && tabName !== 'others') {
+                emptyMsg = 'Đang tải dữ liệu...';
+            }
+
+            renderInfoList(filters[tabName], listContainer, emptyMsg);
 
         };
 
@@ -2624,7 +3113,7 @@
                 e.preventDefault();
                 if (refreshIcon) refreshIcon.classList.add('spinning');
                 setTimeout(() => {
-                    initializeInfoPanel(true, true); // Chạy lại với isInitialLoad và isManualRefresh
+                    initializeInfoPanel(true, true).catch(console.error); // Chạy lại với isInitialLoad và isManualRefresh
                     if (refreshIcon) setTimeout(() => refreshIcon.classList.remove('spinning'), 500);
                 }, 100);
             };
@@ -2635,15 +3124,7 @@
         });
 
         updateTabCounts();
-        // Giữ nguyên tab đang active hoặc mặc định là 'friends'
-        // Dừng vòng lặp quét lại khi đã có dữ liệu
-        if (infoPanelScanInterval) clearInterval(infoPanelScanInterval);
-        infoPanelScanInterval = null;
-
-        if (isInitialLoad) {
-            addClickHandlersToInfoPanel(listContainer);
-        }
-
+        if (isInitialLoad) { addClickHandlersToInfoPanel(listContainer); }
         setActiveTab(currentActiveTab);
     }
 
@@ -2687,17 +3168,15 @@
     }
 
     function cancelReloadTimer() {
-        if (webLogObserver) clearInterval(webLogObserver);
-        if (activeTimerId) {
+        if (webLogObserver) clearInterval(webLogObserver); // Dừng theo dõi log khi hủy hẹn giờ
+        if (activeTimerId) { // Nếu có hẹn giờ đang chạy
             clearInterval(activeTimerId); activeTimerId = null;
             log('Hẹn giờ đã bị hủy.', 'info');
             updateTimerUI();
         }
         sessionStorage.removeItem(CONFIG.TIMER_END_TIME_KEY);
     }
-
     function executeTimerReset() {
-        if (webLogObserver) clearInterval(webLogObserver);
         log('Hết giờ hẹn. Đang tải lại...', 'timer');
         incrementAutoResetCount(); // Tăng số lần auto reset (Reset) do hẹn giờ
         localStorage.setItem(CONFIG.TIMER_RESTART_KEY, 'true');
@@ -2749,10 +3228,28 @@
         if (webLogObserver) { clearInterval(webLogObserver); webLogObserver = null; }
         const webLogId = celebId + '_log';
         let webLogTextarea;
-        try { webLogTextarea = await waitForElementById(webLogId, 10000, 250); } catch (e) { log(`Web log ${webLogId} not found.`, 'warn'); return; }
+        try {
+            webLogTextarea = await waitForElementById(webLogId, 10000, 250);
+            // Khi log của celeb cuối cùng xuất hiện, modal của nó đã mở.
+            // Ta cần xóa class 'modal-open' và backdrop để tránh lỗi layout và cho phép cuộn.
+            document.body.classList.remove('modal-open');
+            const backdrops = document.querySelectorAll('.modal-backdrop.show');
+            backdrops.forEach(backdrop => backdrop.remove());
+        } catch (e) {
+            log(`Web log ${webLogId} not found.`, 'warn'); return;
+        }
 
         log(`Bắt đầu theo dõi nhật ký của ${celebId}...`, 'info');
         let lastLogContent = "";
+
+        // Xóa log cũ của script và bắt đầu hiển thị log của trang web
+        const scriptLogTextarea = document.getElementById('dashboard-script-log');
+        if (scriptLogTextarea) {
+            scriptLogTextarea.value = ''; // Xóa sạch log cũ
+            lastLogContent = webLogTextarea.value; // Lấy nội dung log hiện tại của web
+            scriptLogTextarea.value = lastLogContent; // Hiển thị ngay lập tức
+            scriptLogTextarea.scrollTop = scriptLogTextarea.scrollHeight;
+        }
 
         webLogObserver = setInterval(() => {
             const currentScriptLog = document.getElementById('dashboard-script-log');
@@ -2788,74 +3285,97 @@
         }, 500);
     }
 
-    async function processNextCeleb(celebIds, totalCount) {
-        if (webLogObserver) { clearInterval(webLogObserver); webLogObserver = null; }
-        const state = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
-        stopCelebScanRetry();
-        if (!state.isRunning) { log('Đã dừng quy trình.', 'info'); return; }
+    async function runFullAutoProcess(celebIds, totalCount) {
+        log(`Bắt đầu quy trình Full-Auto cho ${totalCount} celeb...`, 'rocket');
 
-        if (celebIds.length === 0) {
-            sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({ ...state, finished: true }));
+        // Giai đoạn 1: Click "Thêm bạn bè" trên tất cả các celeb đã chọn để mở rộng thẻ của họ.
+        // Việc này được thực hiện trước để tránh việc các nút biến mất sau khi click "Bắt đầu" ở celeb đầu tiên.
+        log('Giai đoạn 1: Mở rộng tất cả các thẻ celeb đã chọn...', 'info');
+        for (const currentId of celebIds) {
+            const currentState = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
+            if (!currentState.isRunning) {
+                log('Người dùng đã dừng quy trình giữa chừng (giai đoạn 1).', 'info');
+                return; // Thoát hoàn toàn nếu người dùng dừng
+            }
+
+            const parentElement = document.getElementById(currentId + '_parentElement');
+            const profileDiv = parentElement?.closest('.profile');
+            const button = profileDiv?.querySelector('button.showMoreBtn');
+
+            if (button && button.textContent.includes('Thêm bạn bè')) {
+                button.click();
+                // Ngay sau khi click, tìm và xóa lớp nền đen có thể xuất hiện
+                await sleep(50); // Chờ một chút để DOM cập nhật
+                const backdrops = document.querySelectorAll('.modal-backdrop.show');
+                backdrops.forEach(backdrop => backdrop.remove());
+                await sleep(100); // Thêm một khoảng dừng nhỏ giữa các lần click
+            }
+        }
+        await sleep(1000); // Chờ 1 giây để đảm bảo tất cả các nút "Bắt đầu" đã xuất hiện
+
+        // Giai đoạn 2: Lặp lại danh sách và click "Bắt đầu" cho từng celeb.
+        for (let i = 0; i < celebIds.length; i++) {
+            const currentId = celebIds[i];
+
+            if (!document.body.classList.contains('auto-celeb-running')) {
+                document.body.classList.add('auto-celeb-running');
+            }
+
+            const currentState = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
+            if (!currentState.isRunning) {
+                log('Người dùng đã dừng quy trình (giai đoạn 2).', 'info');
+                break; // Thoát khỏi vòng lặp nếu người dùng dừng
+            }
+
+            const remainingIds = celebIds.slice(i + 1);
+            sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({ ...currentState, celebIds: remainingIds }));
+
+            runSentCount = totalCount - remainingIds.length;
+            saveRunStats(); // Lưu lại số liệu thống kê sau mỗi lần gửi
+            updateStatsDisplay();
+
+            // Lấy lại thông tin để hiển thị popup
+            const profileDiv = document.getElementById(currentId + '_parentElement')?.closest('.profile');
+            const name = profileDiv?.querySelector('.profile-name')?.textContent.trim() || currentId;
+            const imgSrc = profileDiv?.querySelector('.profile-circle img')?.src || CONFIG.LOGO_URL;
+
+            showCelebPopup(name, `(${runSentCount}/${totalCount})`);
+            processedCelebs.push({ id: currentId, name: name, imgSrc: imgSrc });
+            sessionStorage.setItem(CONFIG.PROCESSED_CELEBS_KEY, JSON.stringify(processedCelebs));
+            updateProcessedCelebsDisplay();
+
+            const startButton = document.getElementById(currentId + '_startButton');
+            if (startButton) {
+                startButton.click();
+                handleChartLog();
+                await sleep(250);
+
+                // Xóa lớp phủ màu đen (modal-backdrop) để các popup có thể hiển thị chồng lên nhau.
+                const backdrops = document.querySelectorAll('.modal-backdrop.show');
+                backdrops.forEach(backdrop => backdrop.remove());
+
+                // Xóa class 'modal-open' khỏi body để có thể cuộn trang nếu cần.
+                document.body.classList.remove('modal-open');
+
+                await sleep(150); // Thêm một khoảng dừng ngắn trước khi xử lý celeb tiếp theo.
+            } else {
+                log(`Không tìm thấy nút "Bắt đầu" cho ${name} sau khi đã mở rộng. Bỏ qua.`, 'error');
+            }
+        }
+
+        const finalState = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
+        if (finalState.isRunning) {
+            sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({ ...finalState, celebIds: [], finished: true }));
             updateControlButtonState({ isRunning: true });
-            log('Đã xử lý hết danh sách.', 'success');
+            log('Auto Celeb hoàn tất!', 'success');
             runSentCount = totalCount;
             updateStatsDisplay();
-            // Timer và Chart tiếp tục chạy cho đến khi người dùng ấn dừng
-            return;
-        }
 
-        const currentId = celebIds.shift();
-        sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({ isRunning: true, celebIds: [...celebIds], totalCount: totalCount }));
-        runSentCount = totalCount - celebIds.length;
-
-        updateChartDrawing();
-        updateStatsDisplay();
-
-        let parentElement;
-        try { parentElement = await waitForElementById(currentId + '_parentElement', 180000, 500); }
-        catch (error) { log(`Không tìm thấy Container cho ${currentId}. Bỏ qua.`, 'error'); await processNextCeleb(celebIds, totalCount); return; }
-
-        const profileDiv = parentElement.closest('.profile');
-        const button = profileDiv ? profileDiv.querySelector('button.showMoreBtn') : null;
-        const name = profileDiv ? profileDiv.querySelector('.profile-name').textContent.trim() : currentId;
-        const imgSrc = profileDiv ? profileDiv.querySelector('.profile-circle img').src : CONFIG.LOGO_URL;
-
-        if (!button || !button.textContent.includes('Thêm bạn bè')) {
-            log(`Bỏ qua ${name}.`);
-            await processNextCeleb(celebIds, totalCount);
-            return;
-        }
-
-        log(`Đang xử lý: ${name}`);
-        showCelebPopup(name, `(${runSentCount}/${totalCount})`);
-        processedCelebs.push({ id: currentId, name: name, imgSrc: imgSrc });
-        sessionStorage.setItem(CONFIG.PROCESSED_CELEBS_KEY, JSON.stringify(processedCelebs));
-        updateProcessedCelebsDisplay();
-
-        button.click();
-        await sleep(1000);
-        const startButton = document.getElementById(currentId + '_startButton');
-        if (startButton) {
-            startButton.click();
-            await sleep(2000);
-            if (celebIds.length === 0) {
-                log(`Đã xong celeb cuối: ${name}.`, 'success');
-                startRealtimeLogObserver(currentId);
-                sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({ isRunning: true, celebIds: [], totalCount: totalCount, finished: true }));
-                updateControlButtonState({ isRunning: true });
-                // Timer và Chart tiếp tục chạy cho đến khi người dùng ấn dừng
-            } else {
-                const toolsLink = document.querySelector('a.nav-link[href="celebrity.html"]');
-                if (toolsLink) {
-                    localStorage.setItem(CONFIG.AUTO_RELOAD_KEY, 'true'); // Đánh dấu công cụ tự chuyển trang
-                    toolsLink.click();
-                }
-                else { log('Celeb Tools link not found.', 'error'); stopProcess(false); }
+            // Bắt đầu theo dõi log của celeb cuối cùng sau khi hoàn tất
+            if (celebIds.length > 0) {
+                const lastCelebId = celebIds[celebIds.length - 1];
+                startRealtimeLogObserver(lastCelebId);
             }
-        } else {
-            log(`Không thấy nút Start cho ${name}.`, 'error');
-            if (webLogObserver) clearInterval(webLogObserver);
-            await processNextCeleb(celebIds, totalCount);
         }
     }
 
@@ -2866,23 +3386,34 @@
         document.querySelectorAll('#celebrityList div.profile').forEach(card => {
             const btn = card.querySelector('button.showMoreBtn');
             const idEl = card.querySelector('[id$="_parentElement"]');
-            if (btn && idEl && btn.textContent.includes('Thêm bạn bè')) {
-                const id = idEl.id.replace('_parentElement', '');
-                const img = card.querySelector('.profile-circle img');
-                const name = card.querySelector('.profile-info .profile-name');
-                const prog = card.querySelector('.profile-info .x-progress');
-                const progText = card.querySelector('.profile-info .x-progress__text');
-                const current = prog ? parseInt(prog.dataset.current, 10) : 0;
-                const max = prog ? parseInt(prog.dataset.max, 10) : 1;
-                let percent = (current / max) * 100;
-                if (percent > 100) percent = 100;
-                if (isNaN(percent) || max === 0) percent = 0;
-                celebs.push({
-                    id, name: name ? name.textContent.trim() : 'Unknown',
-                    imgSrc: img ? img.src : '', progressText: progText ? progText.textContent.trim() : '0/0',
-                    current, max, percent, progressColor: current >= max ? '#dc2626' : '#34c759'
-                });
+
+            if (!idEl) return; // Bỏ qua nếu không có ID
+
+            // Chỉ xử lý celeb nếu họ chưa phải là bạn bè hoặc đang trong hàng chờ.
+            // Điều này ngăn các celeb đã xử lý (pending/friend) xuất hiện lại trong danh sách auto-add.
+            if (btn) {
+                const btnText = btn.textContent.trim();
+                if (btnText.includes('Bạn bè') || btnText.includes('Đã gửi lời mời')) {
+                    return; // Bỏ qua celeb này
+                }
             }
+
+            // Nếu không có nút (khi đang chạy auto) hoặc nút là 'Thêm bạn bè', thì celeb này hợp lệ để xử lý.
+            const id = idEl.id.replace('_parentElement', '');
+            const img = card.querySelector('.profile-circle img');
+            const name = card.querySelector('.profile-info .profile-name');
+            const prog = card.querySelector('.profile-info .x-progress');
+            const progText = card.querySelector('.profile-info .x-progress__text');
+            const current = prog ? parseInt(prog.dataset.current, 10) : 0;
+            const max = prog ? parseInt(prog.dataset.max, 10) : 1;
+            let percent = (current / max) * 100;
+            if (percent > 100) percent = 100;
+            if (isNaN(percent) || max === 0) percent = 0;
+            celebs.push({
+                id, name: name ? name.textContent.trim() : 'Unknown',
+                imgSrc: img ? img.src : '', progressText: progText ? progText.textContent.trim() : '0/0',
+                current, max, percent, progressColor: current >= max ? '#dc2626' : '#34c759'
+            });
         });
         return celebs;
     }
@@ -2892,22 +3423,47 @@
         const listWrapper = document.getElementById('modal-celeb-list-wrapper');
         if (!modal || !listWrapper) return;
 
+        // Hiển thị modal trước để các tính toán scroll (scrollWidth) hoạt động chính xác
+        modal.style.display = 'block';
+
+        // Mobile positioning logic for Dashboard
+        if (window.innerWidth <= 768) {
+            const container = document.getElementById('auto-celeb-main-container');
+            const rect = container.getBoundingClientRect();
+            const topPos = rect.bottom + 10;
+            modal.style.top = `${topPos}px`;
+            modal.style.left = '12px';
+            modal.style.width = 'calc(100vw - 24px)';
+            modal.style.maxHeight = `calc(100vh - ${topPos}px - 20px)`;
+            modal.style.overflowY = 'auto';
+        }
+
         const state = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
         if (state.isRunning) {
+            document.body.classList.add('auto-celeb-running');
             showRunningView();
-            const remaining = state.celebIds ? state.celebIds.length : 0;
-            runSentCount = state.finished ? state.totalCount : (state.totalCount - remaining);
-            runConnectionLostCount = parseInt(localStorage.getItem('autoCelebConnectionLostCount') || '0', 10);
-            runAutoResetCount = parseInt(localStorage.getItem('autoCelebAutoResetCount') || '0', 10);
-            runStartTime = parseInt(sessionStorage.getItem('autoCelebRunStartTime') || Date.now().toString(), 10);
+            loadRunStats();
+
+            // Load processed celebs if not already loaded (for success checking)
+            const storedProcessed = sessionStorage.getItem(CONFIG.PROCESSED_CELEBS_KEY);
+            if (processedCelebs.length === 0 && storedProcessed) {
+                 processedCelebs = JSON.parse(storedProcessed);
+            }
+
             updateProcessedCelebsDisplay();
+            updateSuccessCelebsDisplay();
             updateStatsDisplay();
 
             startChartLoop();
 
             if (runTimerInterval) clearInterval(runTimerInterval);
-            runTimerInterval = setInterval(updateRunTimer, 1000);
+            runTimerInterval = setInterval(() => {
+                updateRunTimer();
+                checkSuccessStatus();
+            }, 1000);
         } else {
+            document.body.classList.remove('auto-celeb-running');
+            listWrapper.style.overflow = 'visible'; // Cho phép hiệu ứng hover ở danh sách chọn
             listWrapper.innerHTML = `
                 <div class="celeb-list-header"><h3>Danh Sách Celebrity</h3><button id="celeb-refresh-button" class="celeb-refresh-button"><span class="refresh-icon">⟳</span> Làm mới</button></div>
                 <div id="celeb-select-all-label"><div id="celeb-select-all-info"><span id="celeb-select-all-text">Chọn tất cả</span><span id="celeb-selected-count">...</span></div><div class="toggle-switch select-all-toggle"><input type="checkbox" id="celeb-select-all-input" class="toggle-switch-input sr-only" checked><label for="celeb-select-all-input" class="toggle-switch-label"><span class="toggle-switch-handle"></span></label></div></div>
@@ -2984,7 +3540,6 @@
 
         loadTimerConfig();
         updateControlButtonState(state);
-        modal.style.display = 'block';
     }
 
     function startProcessFromModal() {
@@ -2992,22 +3547,30 @@
         const ids = Array.from(selected).map(c => c.value);
         if (!ids.length) { log('Chưa chọn celeb nào.', 'error'); return; }
 
+        // Cache lại trạng thái của bảng thống kê trước khi chạy
+        const allCelebsBeforeStart = scanCelebsForInfoPanel();
+        cachedPendingCelebs = allCelebsBeforeStart.filter(c => c.status === 'pending');
+        log('Đã lưu trạng thái "Hàng chờ" trước khi chạy.', 'info');
+
         sessionStorage.removeItem(CONFIG.LOG_STORAGE_KEY);
-        sessionStorage.removeItem(CONFIG.CONNECTION_LOST_COUNTER_KEY);
+        clearRunStats(); // Xóa số liệu thống kê của lần chạy trước
 
         chartDataPoints = new Array(40).fill(2.5);
         sessionStorage.setItem(CONFIG.CHART_DATA_KEY, JSON.stringify(chartDataPoints));
 
         processedCelebs = [];
-        runConnectionLostCount = 0; runSentCount = 0; runAutoResetCount = 0;
+        runSentCount = 0; runSuccessCount = 0; runAutoResetCount = 0;
+        successfulCelebIds = new Set();
         runStartTime = Date.now();
-        sessionStorage.setItem('autoCelebRunStartTime', runStartTime.toString());
-        localStorage.setItem('autoCelebConnectionLostCount', '0');
-        localStorage.setItem('autoCelebAutoResetCount', '0');
         isTabActive = true;
 
+        saveRunStats(); // Lưu trạng thái ban đầu (đã reset)
+
         if (runTimerInterval) clearInterval(runTimerInterval);
-        runTimerInterval = setInterval(updateRunTimer, 1000);
+        runTimerInterval = setInterval(() => {
+            updateRunTimer();
+            checkSuccessStatus();
+        }, 1000);
 
         startChartLoop();
 
@@ -3025,21 +3588,23 @@
         } else if (timerUI) {
             timerUI.classList.add('disabled');
         }
-        processNextCeleb(ids, ids.length);
+        runFullAutoProcess(ids, ids.length);
     }
 
     function stopProcess() {
-        if (webLogObserver) clearInterval(webLogObserver);
         cancelReloadTimer();
         localStorage.removeItem(CONFIG.TIMER_RESTART_KEY);
         localStorage.removeItem(CONFIG.CELEB_RESTART_KEY);
         sessionStorage.removeItem(CONFIG.STORAGE_KEY);
-        sessionStorage.removeItem(CONFIG.CONNECTION_LOST_COUNTER_KEY);
         sessionStorage.removeItem(CONFIG.PROCESSED_CELEBS_KEY);
-        sessionStorage.removeItem('autoCelebRunStartTime');
 
         sessionStorage.removeItem(CONFIG.CHART_DATA_KEY);
         stopChartLoop();
+
+        clearRunStats(); // Xóa tất cả số liệu thống kê khi dừng thủ công
+        // Xóa cache trạng thái thống kê
+        cachedPendingCelebs = null;
+        log('Đã xóa cache trạng thái "Hàng chờ".', 'info');
 
         if (runTimerInterval) clearInterval(runTimerInterval);
 
@@ -3061,16 +3626,26 @@
         chartDataPoints = new Array(40).fill(2.5);
         sessionStorage.setItem(CONFIG.CHART_DATA_KEY, JSON.stringify(chartDataPoints));
 
-        processedCelebs = [];
-        runConnectionLostCount = 0; runSentCount = 0; runAutoResetCount = 0;
-        runStartTime = Date.now();
-        sessionStorage.setItem('autoCelebRunStartTime', runStartTime.toString());
-        localStorage.setItem('autoCelebConnectionLostCount', '0');
-        localStorage.setItem('autoCelebAutoResetCount', '0');
+        // Load processed celebs from storage to resume counting
+        const storedProcessed = sessionStorage.getItem(CONFIG.PROCESSED_CELEBS_KEY);
+        processedCelebs = storedProcessed ? JSON.parse(storedProcessed) : [];
+
+        // Tải lại số liệu thống kê từ lần chạy trước thay vì reset
+        if (!loadRunStats()) {
+            // Fallback nếu không có dữ liệu, khởi tạo lại
+            runConnectionLostCount = 0; runSentCount = 0; runSuccessCount = 0; runAutoResetCount = 0;
+            successfulCelebIds = new Set();
+            runStartTime = Date.now();
+            saveRunStats();
+        }
+
         isTabActive = true;
 
         if (runTimerInterval) clearInterval(runTimerInterval);
-        runTimerInterval = setInterval(updateRunTimer, 1000);
+        runTimerInterval = setInterval(() => {
+            updateRunTimer();
+            checkSuccessStatus();
+        }, 1000);
 
         startChartLoop();
         showRunningView();
@@ -3078,7 +3653,7 @@
         log('Khởi động lại từ danh sách đã lưu...', 'rocket');
         sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({ isRunning: true, celebIds: [...ids], totalCount: ids.length }));
         updateControlButtonState({ isRunning: true });
-        processNextCeleb(ids, ids.length);
+        runFullAutoProcess(ids, ids.length);
     }
 
     // --- FRIENDS LOGIC ---
@@ -3221,11 +3796,146 @@
         });
     }
 
+    /**
+     * Bắt đầu một vòng lặp kiểm tra API trong nền để phát hiện các thay đổi (key, phiên bản, trạng thái)
+     * và phản ứng ngay lập tức mà không cần người dùng tải lại trang.
+     */
+    function startBackgroundApiCheck() {
+        if (backgroundApiCheckInterval) clearInterval(backgroundApiCheckInterval);
+
+        const CHECK_INTERVAL_MS = 10 * 1000; // Kiểm tra mỗi 10 giây
+
+        backgroundApiCheckInterval = setInterval(async () => {
+            try {
+                // Lấy dữ liệu mới nhất từ API, bỏ qua cache
+                const freshApiData = await fetchApiData(true, true); // (isBackgroundRefresh, forceRefresh)
+
+                if (!freshApiData || freshApiData.length === 0) {
+                    // Không làm gì nếu API tạm thời lỗi, chỉ log để debug
+                    console.warn('[Auto Locket Celeb] Kiểm tra API ngầm: Không nhận được dữ liệu.');
+                    return;
+                }
+
+                const openVersions = freshApiData.filter(entry => entry.status === 'Mở');
+                const newActiveEntry = openVersions.length > 0 ? openVersions.sort((a, b) => b.stt - a.stt)[0] : null;
+
+                const container = document.getElementById('auto-celeb-main-container');
+                const keyWallTitle = document.querySelector('#key-wall-title');
+                // Xác định xem có phải đang bị khóa do bảo trì không
+                const isMaintenanceLocked = container.classList.contains('locked') && keyWallTitle && keyWallTitle.textContent === 'Thông báo';
+
+                // Kịch bản 0: Hệ thống vừa được mở lại sau khi tạm dừng
+                if (newActiveEntry && isMaintenanceLocked) {
+                    log('Hệ thống đã hoạt động trở lại. Đang tải lại công cụ...', 'success');
+                    showToastNotification('Hệ thống đã hoạt động trở lại!', 'success', 3000);
+                    // Dừng interval để tránh lặp lại trước khi reload
+                    if (backgroundApiCheckInterval) clearInterval(backgroundApiCheckInterval);
+                    setTimeout(() => location.reload(), 2000);
+                    return; // Dừng kiểm tra ở đây để chờ trang tải lại
+                }
+
+                // Kịch bản 1: Công cụ bị tạm dừng
+                if (!newActiveEntry) {
+                    if (isMaintenanceLocked) return; // Đã ở trạng thái khóa bảo trì, không cần làm gì thêm.
+
+                    log('Hệ thống đã tạm dừng (phát hiện ngầm). Đang khóa công cụ...', 'error');
+
+                    const dashboardModal = document.getElementById('celeb-dashboard-modal');
+                    const infoModal = document.getElementById('modal-information');
+                    const openDashboardButton = document.getElementById('auto-celeb-open-dashboard-btn');
+                    const infoButton = document.getElementById('auto-celeb-info-btn');
+
+                    if (dashboardModal) dashboardModal.style.display = 'none';
+                    if (infoModal) infoModal.style.display = 'none';
+
+                    if (openDashboardButton) {
+                        const label = openDashboardButton.querySelector('.action-btn-label');
+                        if(label) label.textContent = 'Mở Bảng Điều Khiển';
+                        openDashboardButton.classList.remove('close-mode');
+                        const chevron = openDashboardButton.querySelector('.action-btn-chevron');
+                        if (chevron) chevron.innerHTML = `<path d="m9 18 6-6-6-6"/>`; // >
+                    }
+                    if (infoButton) {
+                        const label = infoButton.querySelector('.action-btn-label');
+                        if(label) label.textContent = 'Mở Bảng Thống Kê';
+                        infoButton.classList.remove('close-mode');
+                        infoButton.classList.add('card-indigo');
+                        const chevron = infoButton.querySelector('.action-btn-chevron');
+                        if (chevron) chevron.innerHTML = `<path d="m9 18 6-6-6-6"/>`; // >
+                    }
+
+                    const keyWall = document.getElementById('auto-celeb-key-wall');
+                    container.classList.add('locked');
+                    if (keyWall) {
+                        keyWall.style.display = 'flex';
+                        keyWall.innerHTML = `
+                        <img id="key-wall-icon" src="${CONFIG.LOGO_URL}" alt="Logo">
+                        <h3 id="key-wall-title" style="color: #ef4444;">Thông báo</h3>
+                        <p id="key-wall-message">Công cụ đang tạm dừng hoạt động để bảo trì hoặc cập nhật.<br>Vui lòng quay lại sau.</p>
+                        <div style="margin-top: 10px;">
+                            <a href="${CONFIG.MESSENGER_LINK}" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">Theo dõi thông tin tại Messenger</a>
+                        </div>
+                    `;
+                    }
+                    // Dừng quy trình auto nếu đang chạy
+                    const state = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
+                    if (state.isRunning) {
+                        stopProcess(); // Hàm này sẽ tải lại trang
+                    }
+                    return;
+                }
+
+                // Kịch bản 2: Key đã thay đổi
+                const storedKey = localStorage.getItem(CONFIG.KEY_STORAGE_KEY);
+                if (storedKey !== String(newActiveEntry.key)) {
+                    log('Key đã thay đổi (phát hiện ngầm). Yêu cầu kích hoạt lại.', 'error');
+                    localStorage.removeItem(CONFIG.KEY_STORAGE_KEY);
+                    location.reload();
+                    return;
+                }
+
+                // Kịch bản 3: Có phiên bản mới
+                if (window.location.href.startsWith(CONFIG.TARGET_PAGE) && compareVersions(newActiveEntry.version, CONFIG.SCRIPT_VERSION) > 0) {
+                    const updateNotice = document.getElementById('auto-celeb-update-notice');
+                    if (updateNotice && updateNotice.style.display !== 'flex') {
+                        log(`Phát hiện phiên bản mới ngầm: ${newActiveEntry.version}. Hiển thị thông báo.`, 'warn');
+                        const messageEl = updateNotice.querySelector('#update-notice-message');
+                        if (messageEl) {
+                            messageEl.innerHTML = `Phiên bản của bạn là <strong>${CONFIG.SCRIPT_VERSION}</strong>. Đã có phiên bản mới <strong>${newActiveEntry.version}</strong>. Vui lòng cập nhật để tiếp tục sử dụng.`;
+                        }
+                        updateNotice.style.display = 'flex';
+                        const actionsWrapper = document.getElementById('auto-celeb-actions-wrapper');
+                        const footerButtons = document.getElementById('auto-celeb-footer-buttons');
+                        if (actionsWrapper) actionsWrapper.style.display = 'none';
+                        if (footerButtons) footerButtons.style.display = 'none';
+                    }
+                }
+
+            } catch (error) {
+                log(`Lỗi trong quá trình kiểm tra API ngầm: ${error.message}`, 'error');
+            }
+        }, CHECK_INTERVAL_MS);
+    }
+
     // --- MAIN EXECUTION ---
-    (function main() {
-        console.log(`[Auto Locket Celeb] ➡️ Đã kích hoạt (${CONFIG.SCRIPT_VERSION}).`);
+    (async function main() {
+        console.log(`[Auto Locket Celeb] ➡️ Đang khởi tạo (${CONFIG.SCRIPT_VERSION})...`);
         document.addEventListener("visibilitychange", handleVisibilityChange);
         setInterval(closeNotificationPopup, 1000);
+
+        // Kiểm tra nếu đang chạy mà người dùng chuyển sang trang khác (không phải celebrity.html) thì dừng auto
+        const currentState = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
+        if (currentState.isRunning && !window.location.href.startsWith(CONFIG.TARGET_PAGE)) {
+            console.log('[Auto Locket Celeb] ➡️ Phát hiện rời khỏi trang Celebrity. Đang dừng Auto Celeb...');
+            sessionStorage.removeItem(CONFIG.STORAGE_KEY);
+            sessionStorage.removeItem(CONFIG.PROCESSED_CELEBS_KEY);
+            sessionStorage.removeItem(CONFIG.CHART_DATA_KEY);
+            sessionStorage.removeItem(CONFIG.LOG_STORAGE_KEY);
+            sessionStorage.removeItem(CONFIG.TIMER_END_TIME_KEY);
+            localStorage.removeItem(CONFIG.TIMER_RESTART_KEY);
+            localStorage.removeItem(CONFIG.CELEB_RESTART_KEY);
+            clearRunStats();
+        }
 
         // Dọn dẹp lớp phủ đếm ngược có thể còn sót lại từ lần tải trước
         const preRunOverlay = document.getElementById('auto-celeb-pre-run-overlay');
@@ -3240,17 +3950,100 @@
             setupMainUIControls();
         } catch (e) { console.error('Init error:', e); return; }
 
-        const storedKey = localStorage.getItem(CONFIG.KEY_STORAGE_KEY);
-        const isKeyValidated = (storedKey === CONFIG.SECRET_KEY);
         const container = document.getElementById('auto-celeb-main-container');
+        const storedKey = localStorage.getItem(CONFIG.KEY_STORAGE_KEY);
 
-        if (isKeyValidated) container.classList.remove('locked');
-        else { container.classList.add('locked'); localStorage.removeItem(CONFIG.KEY_STORAGE_KEY); console.log('Locked. Enter key.'); return; }
+        if (!storedKey) {
+            container.classList.add('locked');
+            console.log('[Auto Locket Celeb] ➡️ Yêu cầu key kích hoạt.');
+            return;
+        }
 
-        if (window.location.href === CONFIG.FRIENDS_PAGE) {
-            populateFriendToolUI(); // Gọi ngay lập tức để không bị delay
-        } else if (window.location.href === CONFIG.TARGET_PAGE) {
-            runCelebLogic();
+        // Key is present, show loader and start validation
+        const loader = document.getElementById('auto-celeb-loader');
+        const keyWall = document.getElementById('auto-celeb-key-wall');
+        if (keyWall) keyWall.style.display = 'none';
+        if (loader) loader.style.display = 'flex';
+        container.classList.add('locked'); // Keep it locked during check
+
+        try {
+            const apiData = await fetchApiData();
+            if (!apiData || apiData.length === 0) throw new Error('Không nhận được dữ liệu hợp lệ từ API.');
+
+            // Lọc ra tất cả các phiên bản đang "Mở"
+            const openVersions = apiData.filter(entry => entry.status === 'Mở');
+
+            // Nếu không có phiên bản nào đang mở, hiển thị thông báo tạm dừng
+            if (openVersions.length === 0) {
+                console.log('[Auto Locket Celeb] ➡️ Hệ thống đang bảo trì/tạm dừng.');
+                if (loader) loader.style.display = 'none';
+
+                // Hiển thị giao diện thông báo tạm dừng
+                container.classList.add('locked');
+                if (keyWall) {
+                    keyWall.style.display = 'flex';
+                    keyWall.innerHTML = `
+                        <img id="key-wall-icon" src="${CONFIG.LOGO_URL}" alt="Logo">
+                        <h3 id="key-wall-title" style="color: #ef4444;">Thông báo</h3>
+                        <p id="key-wall-message">Công cụ đang tạm dừng hoạt động để bảo trì hoặc cập nhật.<br>Vui lòng quay lại sau.</p>
+                        <div style="margin-top: 10px;">
+                            <a href="${CONFIG.MESSENGER_LINK}" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">Theo dõi thông tin tại Messenger</a>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            // Tìm phiên bản mới nhất trong số các phiên bản đang mở
+            const activeEntry = openVersions.sort((a, b) => b.stt - a.stt)[0];
+
+            // 1. Kiểm tra cập nhật
+        if (window.location.href.startsWith(CONFIG.TARGET_PAGE) && compareVersions(activeEntry.version, CONFIG.SCRIPT_VERSION) > 0) {
+                log(`Có phiên bản mới: ${activeEntry.version}. Vui lòng cập nhật.`, 'warn');
+                const updateNotice = document.getElementById('auto-celeb-update-notice');
+                if (updateNotice) {
+                    const messageEl = updateNotice.querySelector('#update-notice-message');
+                    if (messageEl) {
+                        messageEl.innerHTML = `Phiên bản của bạn là <strong>${CONFIG.SCRIPT_VERSION}</strong>. Đã có phiên bản mới <strong>${activeEntry.version}</strong>. Vui lòng cập nhật để tiếp tục sử dụng.`;
+                    }
+                    updateNotice.style.display = 'flex';
+                }
+                if (loader) loader.style.display = 'none';
+                return;
+            }
+
+            // 2. Xác thực lại key đã lưu
+            if (storedKey !== String(activeEntry.key)) {
+                 log('Key không hợp lệ hoặc đã thay đổi. Vui lòng kích hoạt lại.', 'error');
+                 localStorage.removeItem(CONFIG.KEY_STORAGE_KEY);
+                 location.reload(); // Reload to show the key input screen
+                 return;
+            }
+
+            // Nếu key hợp lệ và phiên bản là mới nhất
+            if (loader) loader.style.display = 'none';
+            console.log(`[Auto Locket Celeb] ➡️ Kích hoạt thành công (${CONFIG.SCRIPT_VERSION}).`);
+            container.classList.remove('locked');
+
+            // Bắt đầu kiểm tra API ngầm liên tục
+            startBackgroundApiCheck();
+
+            // Chạy logic riêng cho từng trang
+            if (window.location.href.startsWith(CONFIG.FRIENDS_PAGE)) {
+                populateFriendToolUI();
+            } else if (window.location.href.startsWith(CONFIG.TARGET_PAGE)) {
+                runCelebLogic();
+            }
+        } catch (error) {
+            if (loader) loader.style.display = 'none';
+            log(`Lỗi xác thực hoặc kiểm tra phiên bản: ${error.message}`, 'error');
+            showToastNotification(`Lỗi API: ${error.message}`, 'error', 5000);
+            // Giữ UI bị khóa và hiển thị thông báo lỗi
+            const errorNotice = document.createElement('div');
+            errorNotice.style.cssText = 'padding: 20px; text-align: center; color: #ef4444; font-weight: 600;';
+            errorNotice.innerHTML = `Không thể kết nối đến máy chủ để xác thực.<br>Vui lòng thử tải lại trang.`;
+            container.appendChild(errorNotice);
+            return;
         }
 
         async function runCelebLogic() {
@@ -3273,16 +4066,15 @@
                 const isRealReload = navEntries.length > 0 && navEntries[0].type === 'reload';
 
                 // Nếu F5 thủ công (reload thực sự, không phải do timer/celeb restart, không phải auto reload), reset state
-                if (state.isRunning && !restartT && !restartC && !autoReload && isRealReload) {
+                if (state.isRunning && !restartT && !autoReload && isRealReload) {
                     log('Phát hiện F5 thủ công. Đang reset công cụ...', 'info');
                     sessionStorage.removeItem(CONFIG.STORAGE_KEY);
                     sessionStorage.removeItem(CONFIG.LOG_STORAGE_KEY);
-                    sessionStorage.removeItem(CONFIG.CONNECTION_LOST_COUNTER_KEY);
                     sessionStorage.removeItem(CONFIG.PROCESSED_CELEBS_KEY);
                     sessionStorage.removeItem('autoCelebRunStartTime');
+                    sessionStorage.removeItem(CONFIG.CONNECTION_LOST_COUNTER_KEY);
                     sessionStorage.removeItem(CONFIG.CHART_DATA_KEY);
                     sessionStorage.removeItem('autoCelebOriginalList');
-                    localStorage.removeItem('autoCelebConnectionLostCount');
                     localStorage.removeItem('autoCelebAutoResetCount');
                     state = {}; // Reset state variable
 
@@ -3323,46 +4115,6 @@
                         }
                         startProcessFromSavedList(); // Sử dụng hàm mới để chạy lại từ danh sách đã lưu
                     });
-                } else if (restartC) {
-                    log('Phát hiện reset celeb.', 'warn');
-                    localStorage.removeItem(CONFIG.CELEB_RESTART_KEY);
-                    const last = findLastCelebId();
-                    if (last && state.isRunning) {
-                        log(`Thử lại celeb cuối: ${last}`);
-                        state.finished = false; state.celebIds = [last];
-                        sessionStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(state));
-                    }
-                }
-
-                if (state.isRunning) {
-                    log('Đang khôi phục quy trình...', 'info');
-                    openDashboardModal();
-                    if (openBtn) {
-                        const label = openBtn.querySelector('.action-btn-label');
-                        if(label) label.textContent = 'Đóng Bảng Điều Khiển';
-                        openBtn.classList.add('close-mode');
-                        const chevron = openBtn.querySelector('.action-btn-chevron');
-                        if (chevron) {
-                            chevron.innerHTML = `<path d="M15 6L9 12l6 6"/>`; // <
-                        }
-                    }
-
-                    const timerUI = document.getElementById('dashboard-timer-ui');
-                    if (currentTimerConfig.enabled) {
-                        startReloadTimer(currentTimerConfig.minutes);
-                    } else if (timerUI) {
-                        timerUI.classList.add('disabled');
-                    }
-                    if (!state.finished && state.celebIds.length > 0) {
-                        const storedProc = sessionStorage.getItem(CONFIG.PROCESSED_CELEBS_KEY);
-                        processedCelebs = storedProc ? JSON.parse(storedProc) : [];
-                        processNextCeleb(state.celebIds, state.totalCount);
-                    } else if (state.finished) {
-                        const last = findLastCelebId();
-                        if (last && !webLogObserver) startRealtimeLogObserver(last);
-                    }
-
-                    startChartLoop();
                 }
             } catch (e) {
                 log('Khởi tạo thất bại. Đang tải lại...', 'error');
