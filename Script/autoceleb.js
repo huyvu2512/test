@@ -1527,20 +1527,21 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
 
             /* --- MOBILE RESPONSIVE & LAYOUT FIXES --- */
             @media (max-width: 768px) {
-                #auto-celeb-main-container {
-                    width: calc(100vw - 24px) !important;
+                #auto-celeb-main-container:not(.collapsed) {
+                    width: min(340px, 92vw) !important;
                     max-width: none !important;
-                    left: 12px !important;
-                    right: 12px !important;
-                    /* Expanded state always at top */
+                    left: 50% !important;
+                    transform: translateX(-50%) !important;
+                    right: auto !important;
                     top: 15px !important;
-                    transform: none !important;
+                    padding: 14px !important;
+                    gap: 10px !important;
                 }
-
+                
                 /* Collapsed State: Circular Floating Logo */
                 #auto-celeb-main-container.collapsed {
-                    width: 56px !important;
-                    height: 56px !important;
+                    width: 48px !important;
+                    height: 48px !important;
                     border-radius: 50% !important;
                     padding: 0 !important;
                     overflow: hidden !important;
@@ -1571,7 +1572,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
                     min-width: 160px;
                     flex: 0 0 auto; /* Prevent shrinking */
                 }
-
+                
                 /* Modals will be positioned via JS or fixed bottom/below */
             }
         `;
@@ -1979,7 +1980,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
     function makeDraggable(element) {
         let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
         const header = document.getElementById('auto-celeb-popup-header');
-
+        
         if (header) {
             header.onmousedown = dragMouseDown;
             header.ontouchstart = dragTouchStart;
@@ -1988,7 +1989,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
         function dragMouseDown(e) {
             // Only allow dragging if collapsed or on desktop if desired, but user requested for phone collapsed
             if (!element.classList.contains('collapsed') && window.innerWidth <= 768) return;
-
+            
             e.preventDefault();
             pos3 = e.clientX;
             pos4 = e.clientY;
@@ -2482,11 +2483,10 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             mainContainer.classList.toggle('collapsed');
             const isCollapsed = mainContainer.classList.contains('collapsed');
             localStorage.setItem(CONFIG.COLLAPSE_STATE_KEY, isCollapsed);
-
+            
             // Reset position if expanding on mobile to ensure it goes to top
             if (!isCollapsed && window.innerWidth <= 768) {
-                mainContainer.style.top = '15px';
-                mainContainer.style.left = '12px';
+                // CSS !important rules will handle positioning for expanded state
             }
 
             // Nếu thu nhỏ, đóng tất cả các bảng điều khiển đang mở
@@ -2544,7 +2544,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
                 if (!apiData || apiData.length === 0) {
                     throw new Error('Không nhận được dữ liệu hợp lệ từ API.');
                 }
-
+    
                 // Lọc ra tất cả các phiên bản đang "Mở"
                 const openVersions = apiData.filter(entry => entry.status === 'Mở');
 
@@ -2721,15 +2721,16 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
 
             if (show) {
                 infoModal.style.display = 'block';
-
+                
                 // Mobile positioning logic
                 if (window.innerWidth <= 768) {
                     const container = document.getElementById('auto-celeb-main-container');
                     const rect = container.getBoundingClientRect();
                     const topPos = rect.bottom + 10;
                     infoModal.style.top = `${topPos}px`;
-                    infoModal.style.left = '12px';
-                    infoModal.style.width = 'calc(100vw - 24px)';
+                    infoModal.style.left = '50%';
+                    infoModal.style.setProperty('transform', 'translateX(-50%)', 'important');
+                    infoModal.style.width = 'min(340px, 92vw)';
                     infoModal.style.maxHeight = `calc(100vh - ${topPos}px - 20px)`;
                 }
 
@@ -2794,7 +2795,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             });
         }
         allCloseButtons.forEach(btn => btn.addEventListener('click', closeOnlyPopupModals));
-
+        
         // Enable dragging
         makeDraggable(mainContainer);
     }
@@ -3425,15 +3426,16 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
 
         // Hiển thị modal trước để các tính toán scroll (scrollWidth) hoạt động chính xác
         modal.style.display = 'block';
-
+        
         // Mobile positioning logic for Dashboard
         if (window.innerWidth <= 768) {
             const container = document.getElementById('auto-celeb-main-container');
             const rect = container.getBoundingClientRect();
             const topPos = rect.bottom + 10;
             modal.style.top = `${topPos}px`;
-            modal.style.left = '12px';
-            modal.style.width = 'calc(100vw - 24px)';
+            modal.style.left = '50%';
+            modal.style.setProperty('transform', 'translateX(-50%)', 'important');
+            modal.style.width = 'min(340px, 92vw)';
             modal.style.maxHeight = `calc(100vh - ${topPos}px - 20px)`;
             modal.style.overflowY = 'auto';
         }
@@ -3443,7 +3445,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             document.body.classList.add('auto-celeb-running');
             showRunningView();
             loadRunStats();
-
+            
             // Load processed celebs if not already loaded (for success checking)
             const storedProcessed = sessionStorage.getItem(CONFIG.PROCESSED_CELEBS_KEY);
             if (processedCelebs.length === 0 && storedProcessed) {
@@ -3977,7 +3979,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             if (openVersions.length === 0) {
                 console.log('[Auto Locket Celeb] ➡️ Hệ thống đang bảo trì/tạm dừng.');
                 if (loader) loader.style.display = 'none';
-
+                
                 // Hiển thị giao diện thông báo tạm dừng
                 container.classList.add('locked');
                 if (keyWall) {
