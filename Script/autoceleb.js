@@ -1524,57 +1524,6 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             #update-notice-copy-btn:hover { background: rgba(255,255,255,0.2); }
             .update-notice-button.copied { background-color: #22c55e; border-color: #16a34a; color: white; cursor: default; }
             .update-notice-button.copied:hover { background-color: #22c55e; border-color: #16a34a; color: white; }
-
-            /* --- MOBILE RESPONSIVE & LAYOUT FIXES --- */
-            @media (max-width: 768px) {
-                #auto-celeb-main-container:not(.collapsed) {
-                    width: min(340px, 92vw) !important;
-                    max-width: none !important;
-                    left: 50% !important;
-                    transform: translateX(-50%) !important;
-                    right: auto !important;
-                    top: 15px !important;
-                    padding: 14px !important;
-                    gap: 10px !important;
-                }
-                
-                /* Collapsed State: Circular Floating Logo */
-                #auto-celeb-main-container.collapsed {
-                    width: 48px !important;
-                    height: 48px !important;
-                    border-radius: 50% !important;
-                    padding: 0 !important;
-                    overflow: hidden !important;
-                    background: rgba(20, 20, 20, 0.9) !important;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
-                    /* Allow dragging position */
-                    top: auto;
-                }
-                #auto-celeb-main-container.collapsed #auto-celeb-popup-header {
-                    padding: 0 !important; width: 100% !important; height: 100% !important;
-                    justify-content: center !important; background: transparent !important;
-                    box-shadow: none !important;
-                }
-                #auto-celeb-main-container.collapsed #auto-celeb-title-icon {
-                    width: 100% !important; height: 100% !important; border-radius: 50% !important;
-                    box-shadow: none !important; margin: 0 !important;
-                }
-                #auto-celeb-main-container.collapsed #auto-celeb-title-info,
-                #auto-celeb-main-container.collapsed .lc-ambient-glow { display: none !important; }
-
-                /* Horizontal Tools Layout */
-                #auto-celeb-actions-wrapper {
-                    flex-direction: row !important;
-                    overflow-x: auto;
-                    padding-bottom: 5px;
-                }
-                .auto-celeb-action-btn {
-                    min-width: 160px;
-                    flex: 0 0 auto; /* Prevent shrinking */
-                }
-                
-                /* Modals will be positioned via JS or fixed bottom/below */
-            }
         `;
         document.head.appendChild(style);
     }
@@ -1976,66 +1925,6 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
              toast.querySelector('.toast-message').classList.add('processing-message');
          }
      }
-
-    function makeDraggable(element) {
-        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-        const header = document.getElementById('auto-celeb-popup-header');
-        
-        if (header) {
-            header.onmousedown = dragMouseDown;
-            header.ontouchstart = dragTouchStart;
-        }
-
-        function dragMouseDown(e) {
-            // Only allow dragging if collapsed or on desktop if desired, but user requested for phone collapsed
-            if (!element.classList.contains('collapsed') && window.innerWidth <= 768) return;
-            
-            e.preventDefault();
-            pos3 = e.clientX;
-            pos4 = e.clientY;
-            document.onmouseup = closeDragElement;
-            document.onmousemove = elementDrag;
-        }
-
-        function elementDrag(e) {
-            e.preventDefault();
-            pos1 = pos3 - e.clientX;
-            pos2 = pos4 - e.clientY;
-            pos3 = e.clientX;
-            pos4 = e.clientY;
-            element.style.top = (element.offsetTop - pos2) + "px";
-            element.style.left = (element.offsetLeft - pos1) + "px";
-            element.style.right = 'auto'; // Clear right to allow movement
-        }
-
-        function closeDragElement() {
-            document.onmouseup = null;
-            document.onmousemove = null;
-            document.ontouchend = null;
-            document.ontouchmove = null;
-        }
-
-        function dragTouchStart(e) {
-            if (!element.classList.contains('collapsed') && window.innerWidth <= 768) return;
-            const touch = e.touches[0];
-            pos3 = touch.clientX;
-            pos4 = touch.clientY;
-            document.ontouchend = closeDragElement;
-            document.ontouchmove = elementTouchDrag;
-        }
-
-        function elementTouchDrag(e) {
-            // e.preventDefault(); // Commented to allow scrolling if needed, but for drag usually we prevent
-            const touch = e.touches[0];
-            pos1 = pos3 - touch.clientX;
-            pos2 = pos4 - touch.clientY;
-            pos3 = touch.clientX;
-            pos4 = touch.clientY;
-            element.style.top = (element.offsetTop - pos2) + "px";
-            element.style.left = (element.offsetLeft - pos1) + "px";
-            element.style.right = 'auto';
-        }
-    }
 
     function createMainControlUI() {
         const container = document.createElement('div');
@@ -2483,11 +2372,6 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             mainContainer.classList.toggle('collapsed');
             const isCollapsed = mainContainer.classList.contains('collapsed');
             localStorage.setItem(CONFIG.COLLAPSE_STATE_KEY, isCollapsed);
-            
-            // Reset position if expanding on mobile to ensure it goes to top
-            if (!isCollapsed && window.innerWidth <= 768) {
-                // CSS !important rules will handle positioning for expanded state
-            }
 
             // Nếu thu nhỏ, đóng tất cả các bảng điều khiển đang mở
             if (isCollapsed) {
@@ -2721,19 +2605,6 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
 
             if (show) {
                 infoModal.style.display = 'block';
-                
-                // Mobile positioning logic
-                if (window.innerWidth <= 768) {
-                    const container = document.getElementById('auto-celeb-main-container');
-                    const rect = container.getBoundingClientRect();
-                    const topPos = rect.bottom + 10;
-                    infoModal.style.top = `${topPos}px`;
-                    infoModal.style.left = '50%';
-                    infoModal.style.setProperty('transform', 'translateX(-50%)', 'important');
-                    infoModal.style.width = 'min(340px, 92vw)';
-                    infoModal.style.maxHeight = `calc(100vh - ${topPos}px - 20px)`;
-                }
-
                 const label = infoButton.querySelector('.action-btn-label');
                 if(label) label.textContent = 'Đóng Bảng Thống Kê';
                 infoButton.classList.add('close-mode');
@@ -2795,9 +2666,6 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             });
         }
         allCloseButtons.forEach(btn => btn.addEventListener('click', closeOnlyPopupModals));
-        
-        // Enable dragging
-        makeDraggable(mainContainer);
     }
 
     function scanCelebsForInfoPanel() {
@@ -3426,19 +3294,6 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
 
         // Hiển thị modal trước để các tính toán scroll (scrollWidth) hoạt động chính xác
         modal.style.display = 'block';
-        
-        // Mobile positioning logic for Dashboard
-        if (window.innerWidth <= 768) {
-            const container = document.getElementById('auto-celeb-main-container');
-            const rect = container.getBoundingClientRect();
-            const topPos = rect.bottom + 10;
-            modal.style.top = `${topPos}px`;
-            modal.style.left = '50%';
-            modal.style.setProperty('transform', 'translateX(-50%)', 'important');
-            modal.style.width = 'min(340px, 92vw)';
-            modal.style.maxHeight = `calc(100vh - ${topPos}px - 20px)`;
-            modal.style.overflowY = 'auto';
-        }
 
         const state = JSON.parse(sessionStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
         if (state.isRunning) {
