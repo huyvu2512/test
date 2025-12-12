@@ -1222,7 +1222,7 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
                 cursor: default; pointer-events: none; box-shadow: 0 4px 10px rgba(37,99,235,0.25);
             }
             .select-all-toggle { margin-left: 16px; }
-            #celeb-selection-list { flex-grow: 1; overflow-y: auto; padding-right: 16px; }
+            #celeb-selection-list { flex-grow: 1; overflow-y: auto; padding-right: 16px; max-height: 320px; }
             .celeb-list-item-new {
                 display: flex; align-items: center; justify-content: space-between;
                 padding: 12px 16px; border-radius: 18px; margin-bottom: 12px; cursor: pointer;
@@ -1524,6 +1524,37 @@ let cachedOtherCelebsData = null; // Cache for the "Others" tab data
             #update-notice-copy-btn:hover { background: rgba(255,255,255,0.2); }
             .update-notice-button.copied { background-color: #22c55e; border-color: #16a34a; color: white; cursor: default; }
             .update-notice-button.copied:hover { background-color: #22c55e; border-color: #16a34a; color: white; }
+
+            /* --- MOBILE UI SCALING --- */
+            @media (max-width: 768px) {
+                #auto-celeb-main-container {
+                    transform-origin: top left;
+                    transform: scale(0.35); /* Thu nhỏ giao diện còn khoảng 35% theo yêu cầu */
+                    left: 5px !important;
+                    top: 60px !important;
+                    width: 350px !important; /* Giữ width cố định để scale không bị méo */
+                    max-width: none !important;
+                }
+                
+                #celeb-dashboard-modal, 
+                #modal-information {
+                    position: fixed !important;
+                    left: 50% !important;
+                    top: 50% !important;
+                    width: 90vw !important;
+                    max-width: 90vw !important;
+                    transform: translate(-50%, -50%) scale(0.4) !important;
+                    margin: 0 !important;
+                }
+
+                body.auto-celeb-running #celeb-dashboard-modal,
+                body.auto-celeb-running #modal-information {
+                    left: 50% !important;
+                }
+
+                #auto-celeb-popup-container { transform-origin: top right; transform: scale(0.5); right: 5px; top: 50px; }
+                .auto-celeb-modal { transform: translate(-50%, -50%) scale(0.5) !important; }
+            }
         `;
         document.head.appendChild(style);
     }
